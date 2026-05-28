@@ -1,0 +1,20 @@
+# ─────────────────────────────────────────────
+# DrinkDash — Dependencias del proyecto
+# ─────────────────────────────────────────────
+# Instalación:
+#   pip install -r requirements.txt
+# ─────────────────────────────────────────────
+
+# Dashboard e interfaz visual
+streamlit>=1.45.0
+
+# Gráficos interactivos
+plotly>=5.24.0
+
+# Procesamiento de datos (ETL)
+pandas>=2.0.0
+numpy>=1.26.0
+
+# Autenticación — hashing de contraseñas
+bcrypt>=4.1.0
+
