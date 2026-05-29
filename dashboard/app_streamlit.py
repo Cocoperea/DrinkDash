@@ -13,7 +13,7 @@ auth.requiere_autenticacion()
 
 # ── Ruta DB ────────────────────────────────────────────────────────────────────
 BASE_DIR = Path(__file__).resolve().parent.parent
-DB_PATH  = BASE_DIR / "data" / "drinkdash.db"
+DB_PATH  = BASE_DIR / "dags" / "data" / "drinkdash.db"
 
 # ── Carga de datos ─────────────────────────────────────────────────────────────
 @st.cache_data(ttl=60)

@@ -13,12 +13,11 @@ Usuarios creados:
 
 import sqlite3
 import bcrypt
-import os
+from pathlib import Path
+# ── Ruta DB ────────────────────────────────────────────────────────────────────
 
-if os.name == 'nt':
-    DB_PATH = "data/drinkdash.db"
-else:
-    DB_PATH = "/opt/airflow/data/drinkdash.db"
+BASE_DIR = Path(__file__).resolve().parent.parent
+DB_PATH  = BASE_DIR / "dags" / "data" / "drinkdash.db"
 
 USUARIOS_PRUEBA = [
     {"nombre": "Admin Gerencia",   "email": "gerencia@drinkdash.com",  "password": "Gerencia123!",  "rol": "gerencia"},
@@ -71,9 +70,8 @@ def insertar_usuarios_prueba(conn):
 
 
 if __name__ == "__main__":
-    data_dir = os.path.dirname(DB_PATH)
-    if data_dir and not os.path.exists(data_dir):
-        os.makedirs(data_dir)
+
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
     print(f"Conectando a: {DB_PATH}\n")
     conn = sqlite3.connect(DB_PATH)

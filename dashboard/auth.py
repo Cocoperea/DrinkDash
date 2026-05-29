@@ -8,13 +8,12 @@ import sqlite3
 import bcrypt
 import streamlit as st
 from datetime import datetime, timedelta
-import os
+from pathlib import Path
 
-# ── Ruta a la base de datos ────────────────────────────────────────────────────
-if os.name == 'nt':
-    DB_PATH = "data/drinkdash.db"
-else:
-    DB_PATH = "/opt/airflow/data/drinkdash.db"
+# ── Ruta DB ────────────────────────────────────────────────────────────────────
+BASE_DIR = Path(__file__).resolve().parent.parent
+DB_PATH  = BASE_DIR / "dags" / "data" / "drinkdash.db"
+
 
 # ── Seguridad ──────────────────────────────────────────────────────────────────
 MAX_INTENTOS_FALLIDOS    = 3   # RNF-01: bloqueo tras 3 intentos
