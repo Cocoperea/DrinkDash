@@ -110,13 +110,18 @@ with st.sidebar:
     tiene_marca = 'brand' in df.columns
     if tiene_marca:
         marcas_disponibles = sorted(df_tras_cat['brand'].dropna().unique().tolist())
-        marcas_sel = st.multiselect(
-            "Marca",
-            options=marcas_disponibles,
-            default=[],
-            placeholder="Todas las marcas",
-        )
-        marcas_sel = [m for m in marcas_sel if m in marcas_disponibles]
+
+        if not marcas_disponibles:
+            st.caption("⚠️ No hay marcas disponibles para la categoría y fecha seleccionadas.")
+            marcas_sel = []
+        else:
+            marcas_sel = st.multiselect(
+                "Marca",
+                options=marcas_disponibles,
+                default=[],
+                placeholder="Todas las marcas",
+            )
+            marcas_sel = [m for m in marcas_sel if m in marcas_disponibles]
     else:
         marcas_sel = []
  
@@ -136,11 +141,16 @@ if filtros_activos:
 # ══════════════════════════════════════════════════════════════════════════════
 if auth.tiene_permiso("RF-04"):
     st.subheader("Indicadores Globales")
- 
+
     if df_filtrado.empty:
         st.warning(
             "⚠️ No se encontraron transacciones para los filtros seleccionados. "
             "Probá con otro rango de fechas, categoría o marca."
+        )
+    elif df_filtrado['amount'].isna().all() or df_filtrado['amount'].sum() == 0:
+        st.info(
+            "ℹ️ No se registraron ventas para el período y filtros seleccionados. "
+            "Intentá ampliar el rango de fechas o cambiar los filtros."
         )
     else:
         # ── KPIs ─────────────────────────────────────────────────────────────
@@ -148,57 +158,65 @@ if auth.tiene_permiso("RF-04"):
         col1.metric("Revenue Total",     f"${df_filtrado['amount'].sum():,.2f}")
         col2.metric("Unidades Vendidas", f"{df_filtrado['quantity'].sum():,}")
         col3.metric("Ticket Promedio",   f"${df_filtrado['amount'].mean():,.2f}")
- 
+
         # ── Gráfico de área: evolución temporal del revenue ───────────────────
         if tiene_fecha:
-            granularidad = st.selectbox(
-                "Granularidad del gráfico",
-                options=["Diario", "Mensual", "Anual"],
-                index=0,
-                key="rf04_granularidad",
-            )
- 
-            freq_map  = {"Diario": "D",   "Mensual": "M",   "Anual": "Y"}
-            label_map = {"Diario": "Día", "Mensual": "Mes", "Anual": "Año"}
-            freq   = freq_map[granularidad]
-            xlabel = label_map[granularidad]
- 
-            # Construir serie temporal desde la columna original de fecha
-            # (puede venir como string desde SQLite — forzamos datetime aquí)
             serie_fecha = pd.to_datetime(df_filtrado[COL_FECHA], errors='coerce')
             revenue_tiempo = (
                 df_filtrado['amount']
-                .groupby(serie_fecha.dt.to_period(freq))
+                .groupby(serie_fecha.dt.to_period('D'))
                 .sum()
                 .reset_index()
-                .rename(columns={COL_FECHA: 'periodo', 'amount': 'revenue'})
             )
             revenue_tiempo.columns = ['periodo', 'revenue']
-            revenue_tiempo['periodo_dt'] = revenue_tiempo['periodo'].dt.to_timestamp()
- 
-            # Formatear etiqueta del eje X
-            if granularidad == "Diario":
-                revenue_tiempo['periodo_label'] = revenue_tiempo['periodo_dt'].dt.strftime('%d/%m/%Y')
-            elif granularidad == "Mensual":
-                revenue_tiempo['periodo_label'] = revenue_tiempo['periodo_dt'].dt.strftime('%b %Y')
+
+            if revenue_tiempo.empty or revenue_tiempo['revenue'].sum() == 0:
+                st.info("ℹ️ No hay datos de revenue disponibles para graficar en el período seleccionado.")
             else:
-                revenue_tiempo['periodo_label'] = revenue_tiempo['periodo_dt'].dt.strftime('%Y')
- 
-            fig_area = px.area(
-                revenue_tiempo,
-                x='periodo_label',
-                y='revenue',
-                labels={'periodo_label': xlabel, 'revenue': 'Revenue ($)'},
-                title=f"Evolución del Revenue — Vista {granularidad}",
-            )
-            fig_area.update_traces(
-                line_color='#1f77b4',
-                fillcolor='rgba(31, 119, 180, 0.15)',
-                hovertemplate='%{x}<br>Revenue: $%{y:,.2f}<extra></extra>',
-            )
-            fig_area.update_layout(xaxis_tickangle=-45)
-            st.plotly_chart(fig_area, use_container_width=True)
- 
+                granularidad = st.selectbox(
+                    "Granularidad del gráfico",
+                    options=["Diario", "Mensual", "Anual"],
+                    index=0,
+                    key="rf04_granularidad",
+                )
+
+                freq_map  = {"Diario": "D",   "Mensual": "M",   "Anual": "Y"}
+                label_map = {"Diario": "Día", "Mensual": "Mes", "Anual": "Año"}
+                freq   = freq_map[granularidad]
+                xlabel = label_map[granularidad]
+
+                # Reagrupar según la granularidad elegida
+                revenue_tiempo = (
+                    df_filtrado['amount']
+                    .groupby(serie_fecha.dt.to_period(freq))
+                    .sum()
+                    .reset_index()
+                )
+                revenue_tiempo.columns = ['periodo', 'revenue']
+                revenue_tiempo['periodo_dt'] = revenue_tiempo['periodo'].dt.to_timestamp()
+
+                if granularidad == "Diario":
+                    revenue_tiempo['periodo_label'] = revenue_tiempo['periodo_dt'].dt.strftime('%d/%m/%Y')
+                elif granularidad == "Mensual":
+                    revenue_tiempo['periodo_label'] = revenue_tiempo['periodo_dt'].dt.strftime('%b %Y')
+                else:
+                    revenue_tiempo['periodo_label'] = revenue_tiempo['periodo_dt'].dt.strftime('%Y')
+
+                fig_area = px.area(
+                    revenue_tiempo,
+                    x='periodo_label',
+                    y='revenue',
+                    labels={'periodo_label': xlabel, 'revenue': 'Revenue ($)'},
+                    title=f"Evolución del Revenue — Vista {granularidad}",
+                )
+                fig_area.update_traces(
+                    line_color='#1f77b4',
+                    fillcolor='rgba(31, 119, 180, 0.15)',
+                    hovertemplate='%{x}<br>Revenue: $%{y:,.2f}<extra></extra>',
+                )
+                fig_area.update_layout(xaxis_tickangle=-45)
+                st.plotly_chart(fig_area, use_container_width=True)
+
     st.divider()
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -206,11 +224,49 @@ if auth.tiene_permiso("RF-04"):
 # ══════════════════════════════════════════════════════════════════════════════
 if auth.tiene_permiso("RF-05"):
     st.subheader("Ventas por Franja Horaria")
-    ventas_hora = df.groupby('purchase_hour')['amount'].sum().reset_index()
-    fig_hora = px.bar(ventas_hora, x='purchase_hour', y='amount',
-                      labels={'purchase_hour': 'Hora del Día', 'amount': 'Ingresos ($)'},
-                      title="Distribución de Ingresos por Hora")
-    st.plotly_chart(fig_hora, use_container_width=True)
+
+    if df_filtrado.empty:
+        st.warning(
+            "⚠️ No se encontraron transacciones para los filtros seleccionados. "
+            "Probá con otro rango de fechas, categoría o marca."
+        )
+    elif 'purchase_hour' not in df_filtrado.columns:
+        st.warning("⚠️ No se encontró la columna de hora en los datos.")
+    else:
+        ventas_hora = (
+            df_filtrado.groupby('purchase_hour')
+            .size()
+            .reset_index(name='cantidad_transacciones')
+        )
+
+        if ventas_hora.empty or ventas_hora['cantidad_transacciones'].sum() == 0:
+            st.info("ℹ️ No se registraron transacciones para el período y filtros seleccionados.")
+        else:
+            fig_hora = px.bar(
+                ventas_hora,
+                x='purchase_hour',
+                y='cantidad_transacciones',
+                labels={
+                    'purchase_hour': 'Hora del Día',
+                    'cantidad_transacciones': 'Cantidad de Transacciones'
+                },
+                title="Distribución de Transacciones por Franja Horaria",
+            )
+            fig_hora.update_layout(
+                xaxis=dict(
+                    tickmode='linear',
+                    tick0=0,
+                    dtick=1,
+                    title='Hora del Día'
+                ),
+                yaxis_title='Cantidad de Transacciones',
+                bargap=0.2,
+            )
+            fig_hora.update_traces(
+                hovertemplate='%{x}hs<br>Transacciones: %{y}<extra></extra>',
+            )
+            st.plotly_chart(fig_hora, use_container_width=True)
+
     st.divider()
 
 # ══════════════════════════════════════════════════════════════════════════════
