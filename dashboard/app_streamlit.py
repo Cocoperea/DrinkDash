@@ -274,12 +274,63 @@ if auth.tiene_permiso("RF-05"):
 # ══════════════════════════════════════════════════════════════════════════════
 if auth.tiene_permiso("RF-07"):
     st.subheader("Ranking de Productos")
-    ranking = (df.groupby('product_name')['quantity']
-                 .sum().reset_index()
-                 .sort_values('quantity', ascending=False)
-                 .head(5))
-    fig_ranking = px.bar(ranking, x='quantity', y='product_name', orientation='h',
-                         labels={'quantity': 'Cantidad Vendida', 'product_name': 'Producto'},
-                         title="Top 5 Productos más Vendidos")
-    st.plotly_chart(fig_ranking, use_container_width=True)
+
+    if df_filtrado.empty:
+        st.warning(
+            "⚠️ No se encontraron transacciones para los filtros seleccionados. "
+            "Probá con otro rango de fechas, categoría o marca."
+        )
+    elif 'product_name' not in df_filtrado.columns or 'quantity' not in df_filtrado.columns:
+        st.warning("⚠️ No se encontraron las columnas necesarias para generar el ranking.")
+    else:
+        col_top, col_orden = st.columns([1, 1])
+        with col_top:
+            top_n = st.selectbox(
+                "Cantidad de productos a mostrar",
+                options=[5, 10, 20, 50],
+                index=0,
+                key="rf07_top_n",
+            )
+        with col_orden:
+            orden = st.selectbox(
+                "Ordenar por",
+                options=["Unidades (mayor a menor)", "Unidades (menor a mayor)"],
+                index=0,
+                key="rf07_orden",
+            )
+
+        ascending = orden == "Unidades (menor a mayor)"
+
+        ranking = (
+            df_filtrado.groupby('product_name')['quantity']
+            .sum()
+            .reset_index()
+            .sort_values('quantity', ascending=ascending)
+            .head(top_n)
+        )
+
+        if ranking.empty or ranking['quantity'].sum() == 0:
+            st.info("ℹ️ No se registraron unidades vendidas para el período y filtros seleccionados.")
+        else:
+            fig_ranking = px.bar(
+                ranking,
+                x='quantity',
+                y='product_name',
+                orientation='h',
+                labels={
+                    'quantity': 'Unidades Vendidas',
+                    'product_name': 'Producto'
+                },
+                title=f"Top {top_n} Productos — {orden}",
+            )
+            fig_ranking.update_traces(
+                hovertemplate='%{y}<br>Unidades vendidas: %{x:,}<extra></extra>',
+            )
+            fig_ranking.update_layout(
+                yaxis={'categoryorder': 'total ascending' if not ascending else 'total descending'},
+                xaxis_title='Unidades Vendidas',
+                yaxis_title='Producto',
+            )
+            st.plotly_chart(fig_ranking, use_container_width=True)
+
     st.divider()
