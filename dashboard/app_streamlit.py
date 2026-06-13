@@ -246,10 +246,12 @@ NAV_POR_ROL = {
     "gerencia": [
         ("resumen",    "Resumen general"),
         ("horario",    "Ventas por horario"),
-        ("evolucion",  "Evolución de ventas"),
-        ("ticket",     "Ticket promedio"),
+        ("cantidades", "Cantidades vendidas"),
         ("ranking",    "Ranking de productos"),
         ("descuentos", "Análisis de descuentos"),
+        ("evolucion",  "Evolución de ventas"),
+        ("ticket",     "Ticket promedio"),
+        
     ],
     "ventas": [
         ("resumen",    "Resumen ventas"),
@@ -257,22 +259,27 @@ NAV_POR_ROL = {
         ("ranking",    "Ranking de productos"),
         ("descuentos", "Análisis de descuentos"),
         ("ticket",     "Ticket promedio"),
-        ("revenue",    "Revenue total"),
+        
     ],
     "marketing": [
         ("resumen",        "Comportamiento de mercado"),
+        ("cantidades",     "Cantidades vendidas"),
+        ("ranking",    "Ranking de productos"),
+        ("descuentos", "Análisis de descuentos"),
         ("frecuencia",     "Frecuencia de compra"),
+        ("elasticidad",    "Elasticidad precio-demanda"),
         ("marcas",         "Preferencias de marca"),
         ("estacionalidad", "Estacionalidad"),
-        ("efectividad",    "Efectividad de descuentos"),
-        ("revenue",        "Revenue total"),
+        
     ],
     "direccion": [
         ("resumen",        "Resumen estratégico"),
-        ("crecimiento",    "Crecimiento"),
+        ("cantidades",     "Cantidades vendidas"),
+        ("ranking",    "Ranking de productos"),
+        ("descuentos", "Análisis de descuentos"),
+        ("evolucion",  "Evolución de ventas"),
         ("elasticidad",    "Elasticidad precio-demanda"),
         ("estacionalidad", "Estacionalidad"),
-        ("descuentos",     "Análisis de descuentos"),
         ("exportar",       "Exportar reportes"),
     ],
 }
@@ -684,6 +691,47 @@ if auth.tiene_permiso("RF-05") and st.session_state.seccion_activa == "horario":
                 )
                 card_grafico("Ventas por franja horaria")
                 st.plotly_chart(fig_hora, use_container_width=True)
+                st.markdown("</div>", unsafe_allow_html=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# RF-06 — Visualizar cantidades vendidas (todos los roles)
+# ══════════════════════════════════════════════════════════════════════════════
+if auth.tiene_permiso("RF-06") and st.session_state.seccion_activa == "cantidades":
+    if auth.tiene_permiso("RF-06"):
+
+        if df_filtrado.empty:
+            st.warning("⚠️ No se encontraron transacciones para los filtros seleccionados.")
+        elif 'quantity' not in df_filtrado.columns:
+            st.warning("⚠️ No se encontró la columna de cantidad en los datos.")
+        else:
+            cantidades_tiempo = (
+                df_filtrado['quantity']
+                .groupby(pd.to_datetime(df_filtrado[COL_FECHA], errors='coerce').dt.to_period('D'))
+                .sum()
+                .reset_index()
+            )
+            cantidades_tiempo.columns = ['periodo', 'cantidad']
+            cantidades_tiempo['periodo_dt'] = cantidades_tiempo['periodo'].dt.to_timestamp()
+            cantidades_tiempo['label'] = cantidades_tiempo['periodo_dt'].dt.strftime('%d/%m/%Y')
+
+            if cantidades_tiempo.empty or cantidades_tiempo['cantidad'].sum() == 0:
+                st.info("ℹ️ No hay datos de cantidades vendidas para graficar en el período seleccionado.")
+            else:
+                fig_cant = go.Figure()
+                fig_cant.add_trace(go.Scatter(
+                    x=cantidades_tiempo['label'],
+                    y=cantidades_tiempo['cantidad'],
+                    mode='lines',
+                    fill='tozeroy',
+                    line=dict(color='#4f8ef7', width=2),
+                    fillcolor='rgba(79,142,247,0.12)',
+                    hovertemplate='%{x}<br>Cantidad: %{y}<extra></extra>',
+                ))
+                aplicar_layout(fig_cant, "Evolución de cantidades vendidas")
+                fig_cant.update_layout(xaxis_tickangle=-30, showlegend=False)
+                card_grafico("Evolución de cantidades vendidas")
+                st.plotly_chart(fig_cant, use_container_width=True)
                 st.markdown("</div>", unsafe_allow_html=True)
 
 
