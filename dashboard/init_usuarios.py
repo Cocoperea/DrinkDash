@@ -9,10 +9,12 @@ Usuarios creados:
     direccion@drinkdash.com  /  Direccion123!
     ventas@drinkdash.com     /  Ventas123!
     marketing@drinkdash.com  /  Marketing123!
+    marketing2@drinkdash.com /  Marketing2123!
 """
 
 import sqlite3
 import bcrypt
+from datetime import datetime, timedelta
 from pathlib import Path
 # ── Ruta DB ────────────────────────────────────────────────────────────────────
 
@@ -24,6 +26,7 @@ USUARIOS_PRUEBA = [
     {"nombre": "Admin Dirección",  "email": "direccion@drinkdash.com", "password": "Direccion123!", "rol": "direccion"},
     {"nombre": "Admin Ventas",     "email": "ventas@drinkdash.com",    "password": "Ventas123!",    "rol": "ventas"},
     {"nombre": "Admin Marketing",  "email": "marketing@drinkdash.com", "password": "Marketing123!", "rol": "marketing"},
+    {"nombre": "Admin Marketing 2", "email": "marketing2@drinkdash.com", "password": "Marketing2123!", "rol": "marketing"},
 ]
 
 
@@ -68,6 +71,14 @@ def insertar_usuarios_prueba(conn):
     conn.commit()
     print(f"\nResumen: {insertados} creado(s), {omitidos} omitido(s).")
 
+def bloquear_usuario(conn, email: str, minutos: int):
+    bloqueado_hasta = (datetime.now() + timedelta(minutes=minutos)).isoformat()
+    conn.execute(
+        "UPDATE usuarios SET bloqueado_hasta = ?, intentos_fallidos = 0 WHERE email = ?",
+        (bloqueado_hasta, email)
+    )
+    conn.commit()
+    print(f"Usuario '{email}' bloqueado hasta {bloqueado_hasta}.")
 
 if __name__ == "__main__":
 
@@ -80,9 +91,12 @@ if __name__ == "__main__":
         print("\nInsertando usuarios de prueba:")
         insertar_usuarios_prueba(conn)
         print("\n" + "─" * 45)
+        print("BLQUEO DE USUARIOS DE PRUEBA:")
+        print("─" * 45)
+        bloquear_usuario(conn, "marketing2@drinkdash.com", 999999)
         print("CREDENCIALES DE PRUEBA:")
         print("─" * 45)
         for u in USUARIOS_PRUEBA:
-            print(f"  {u['rol']:<12}  {u['email']:<30}  {u['password']}")
+            print(f"  {u['rol']:<12}  {u['email']:<30}  {u['password']})")
     finally:
         conn.close()

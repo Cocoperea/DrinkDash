@@ -793,3 +793,95 @@ if auth.tiene_permiso("RF-07") and st.session_state.seccion_activa == "ranking":
                 card_grafico(f"Top {top_n} productos más vendidos")
                 st.plotly_chart(fig_ranking, use_container_width=True)
                 st.markdown("</div>", unsafe_allow_html=True)
+
+# ══════════════════════════════════════════════════════════════════════════════
+# RF-08 — Analizar descuentos (todos los roles)
+# ══════════════════════════════════════════════════════════════════════════════
+if auth.tiene_permiso("RF-08") and st.session_state.seccion_activa == "descuentos":
+    if auth.tiene_permiso("RF-08"):
+
+        if df_filtrado.empty:
+            st.warning("⚠️ No se encontraron transacciones para los filtros seleccionados.")
+        elif 'revenue_sacrificado' not in df_filtrado.columns or 'revenue_bruto' not in df_filtrado.columns:
+            st.warning("⚠️ No se encontraron las columnas necesarias para analizar descuentos.")
+        else:
+            total_sacrificado = df_filtrado['revenue_sacrificado'].sum()
+            total_bruto = df_filtrado['revenue_bruto'].sum()
+            total_real = total_bruto - total_sacrificado
+            
+            fig_descuentos = go.Figure(go.Waterfall(
+                name="Descuentos",
+                orientation="v",
+                measure=["absolute", "relative", "total"],
+                x=["Revenue bruto", "Descuentos", "Revenue real"],
+                y=[total_bruto, -total_sacrificado, total_real],
+                text=[f"${total_bruto:,.0f}", f"-${total_sacrificado:,.0f}", f"${total_real:,.0f}"],
+                textposition="outside",
+                increasing=dict(marker=dict(color='#4f8ef7')),
+                decreasing=dict(marker=dict(color='#e53e3e')),
+                totals=dict(marker=dict(color='#2a3347')),
+            ))
+            aplicar_layout(fig_descuentos, "Impacto de los descuentos sobre el revenue")   
+            fig_descuentos.update_layout(
+                yaxis=dict(gridcolor="#1e2a3a"),
+                showlegend=False,
+            )
+            card_grafico("Análisis de descuentos")
+            st.plotly_chart(fig_descuentos, use_container_width=True)
+            st.markdown("</div>", unsafe_allow_html=True)
+
+                
+# ══════════════════════════════════════════════════════════════════════════════
+# RF-09 — Visualizar evolución de ventas (gerencia y dirección)
+# ══════════════════════════════════════════════════════════════════════════════
+if auth.tiene_permiso("RF-09") and st.session_state.seccion_activa == "evolucion":
+    if auth.tiene_permiso("RF-09"):
+
+        if df_filtrado.empty:
+            st.warning("⚠️ No se encontraron transacciones para los filtros seleccionados.")
+        elif 'amount' not in df_filtrado.columns:
+            st.warning("⚠️ No se encontró la columna de monto en los datos.")
+        else:
+            revenue_mes = (
+                df_filtrado['amount']
+                .groupby(pd.to_datetime(df_filtrado[COL_FECHA], errors='coerce').dt.to_period('M'))
+                .sum()
+                .reset_index()
+            )
+            revenue_mes.columns = ['periodo', 'revenue']
+            revenue_mes['periodo_dt'] = revenue_mes['periodo'].dt.to_timestamp()
+
+            if revenue_mes.empty or revenue_mes['revenue'].sum() == 0:
+                st.info("ℹ️ No hay datos de revenue para graficar la evolución en el período seleccionado.")
+            else:
+                # Calculamos la variación porcentual respecto al mes anterior
+                revenue_mes['pct_var'] = revenue_mes['revenue'].pct_change() * 100
+
+                #Se muestra la evolución del revenue en un gráfico de líneas y debajo una tabla con la variación porcentual mes a mes.
+                fig_evolucion = go.Figure()
+                fig_evolucion.add_trace(go.Scatter(
+                    x=revenue_mes['periodo_dt'],
+                    y=revenue_mes['revenue'],
+                    mode='lines+markers',
+                    line=dict(color='#4f8ef7', width=2),
+                    marker=dict(size=6, color='#4f8ef7'),
+                    hovertemplate='%{x|%b %Y}<br>Revenue: $%{y:,.0f}<extra></extra>',
+                ))
+                aplicar_layout(fig_evolucion, "Evolución de ventas — Revenue mensual")
+                fig_evolucion.update_layout(xaxis_tickangle=-30, showlegend=False)
+                card_grafico("Evolución de ventas — Revenue mensual")
+                st.plotly_chart(fig_evolucion, use_container_width=True)
+                st.markdown("</div>", unsafe_allow_html=True)
+                # Tabla de variación porcentual mes a mes
+                st.markdown(f"""
+                <div style="background:#1c2333; border:1px solid #2a3347; border-radius:8px;
+                            padding:12px; margin-top:16px;">
+                    <div style="font-size:0.9rem; font-weight:600; color:#e8eaf0; margin-bottom:8px;">
+                        Variación porcentual mes a mes
+                    </div>
+                """, unsafe_allow_html=True)
+                var_mes = revenue_mes[['periodo_dt', 'pct_var']].copy()
+                var_mes['periodo_dt'] = var_mes['periodo_dt'].dt.strftime('%b %Y')
+                var_mes['pct_var'] = var_mes['pct_var'].apply(lambda x: f"{x:+.1f}%" if pd.notna(x) else "N/A")
+                st.table(var_mes.rename(columns={'periodo_dt': 'Mes', 'pct_var': 'Variación %'}))
+                st.markdown("</div>", unsafe_allow_html=True)
