@@ -995,4 +995,130 @@ if auth.tiene_permiso("RF-10") and st.session_state.seccion_activa == "ticket":
                 })
                 st.table(tabla_tp)
                 st.markdown("</div>", unsafe_allow_html=True)
+
+# ══════════════════════════════════════════════════════════════════════════════
+# RF-11 — Frecuencia de compra (Marketing)
+# Cuenta la cantidad de facturas distintas (invoice_id) por cliente y muestra
+# un histograma con la distribución de frecuencias.
+# Rol con acceso: marketing (exclusivo, según SRS tabla de RFs y caso de uso
+# "Visualizar Métricas Marketing").
+# ══════════════════════════════════════════════════════════════════════════════
+if auth.tiene_permiso("RF-11") and st.session_state.seccion_activa == "frecuencia":
  
+    if df_filtrado.empty:
+        st.warning("⚠️ No se encontraron transacciones para los filtros seleccionados.")
+    elif 'customer_id' not in df_filtrado.columns:
+        st.warning("⚠️ No se encontró la columna de cliente (customer_id) en los datos.")
+    elif 'invoice_id' not in df_filtrado.columns:
+        st.warning("⚠️ No se encontró la columna de factura (invoice_id) en los datos.")
+    else:
+        # ── Cálculo de frecuencia ──────────────────────────────────────────────
+        # Regla de negocio: contar la cantidad de invoice_id distintos por cliente.
+        # Cada fila puede ser una línea de producto de la misma factura,
+        # por eso usamos nunique() y no count().
+        freq_cliente = (
+            df_filtrado.groupby('customer_id')['invoice_id']
+            .nunique()
+            .reset_index()
+        )
+        freq_cliente.columns = ['customer_id', 'compras']
+ 
+        if freq_cliente.empty or freq_cliente['compras'].sum() == 0:
+            st.info("ℹ️ No hay datos de frecuencia de compra para el período seleccionado.")
+        else:
+            # ── KPIs de contexto ───────────────────────────────────────────────
+            kpi_cols = st.columns(4)
+            kpi_cols[0].metric("Clientes únicos",         f"{len(freq_cliente):,}")
+            kpi_cols[1].metric("Frecuencia promedio",     f"{freq_cliente['compras'].mean():.1f} compras")
+            kpi_cols[2].metric("Máx. compras (un cliente)", f"{freq_cliente['compras'].max():,}")
+            kpi_cols[3].metric("Clientes recurrentes (>1)", f"{(freq_cliente['compras'] > 1).sum():,}")
+ 
+            st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
+ 
+            # ── Histograma de distribución ─────────────────────────────────────
+            # Agrupamos la frecuencia en bins para mostrar cuántos clientes
+            # realizaron exactamente N compras. Si el rango es muy amplio,
+            # usamos bins; si es acotado (<= 20 valores únicos), mostramos
+            # una barra por valor exacto para mayor legibilidad.
+            valores_unicos = freq_cliente['compras'].nunique()
+            max_compras    = freq_cliente['compras'].max()
+ 
+            if valores_unicos <= 20:
+                # Conteo exacto: barra por cantidad de compras
+                dist = (
+                    freq_cliente['compras']
+                    .value_counts()
+                    .sort_index()
+                    .reset_index()
+                )
+                dist.columns = ['n_compras', 'clientes']
+                dist['label'] = dist['n_compras'].astype(str) + " compra" + dist['n_compras'].apply(lambda x: "s" if x != 1 else "")
+ 
+                fig_freq = go.Figure()
+                fig_freq.add_trace(go.Bar(
+                    x=dist['label'],
+                    y=dist['clientes'],
+                    marker_color='#8b5cf6',
+                    hovertemplate='%{x}<br>Clientes: %{y:,}<extra></extra>',
+                ))
+                aplicar_layout(fig_freq, "Distribución de frecuencia de compra por cliente")
+                fig_freq.update_layout(
+                    xaxis=dict(gridcolor="#1e2a3a", title="Cantidad de compras"),
+                    yaxis=dict(gridcolor="#1e2a3a", title="Cantidad de clientes"),
+                    bargap=0.25,
+                    showlegend=False,
+                )
+            else:
+                # Histograma con bins automáticos para distribuciones amplias
+                fig_freq = go.Figure()
+                fig_freq.add_trace(go.Histogram(
+                    x=freq_cliente['compras'],
+                    nbinsx=min(30, max_compras),
+                    marker_color='#8b5cf6',
+                    hovertemplate='Rango: %{x}<br>Clientes: %{y:,}<extra></extra>',
+                ))
+                aplicar_layout(fig_freq, "Distribución de frecuencia de compra por cliente")
+                fig_freq.update_layout(
+                    xaxis=dict(gridcolor="#1e2a3a", title="Cantidad de compras"),
+                    yaxis=dict(gridcolor="#1e2a3a", title="Cantidad de clientes"),
+                    bargap=0.1,
+                    showlegend=False,
+                )
+ 
+            card_grafico("Distribución de frecuencia de compra")
+            st.plotly_chart(fig_freq, use_container_width=True)
+            st.markdown("</div>", unsafe_allow_html=True)
+ 
+            # ── Tabla de segmentación por frecuencia ───────────────────────────
+            # Agrupa a los clientes en segmentos (1 compra / 2-5 / 6-10 / >10)
+            # para facilitar la lectura estratégica del gráfico.
+            def segmentar(n):
+                if n == 1:   return "1 compra (ocasionales)"
+                if n <= 5:   return "2–5 compras (regulares)"
+                if n <= 10:  return "6–10 compras (frecuentes)"
+                return ">10 compras (muy frecuentes)"
+ 
+            freq_cliente['segmento'] = freq_cliente['compras'].apply(segmentar)
+            orden_seg = ["1 compra (ocasionales)", "2–5 compras (regulares)", "6–10 compras (frecuentes)", ">10 compras (muy frecuentes)"]
+ 
+            tabla_seg = (
+                freq_cliente.groupby('segmento')['customer_id']
+                .count()
+                .reindex(orden_seg)
+                .dropna()
+                .reset_index()
+            )
+            tabla_seg.columns = ['Segmento', 'Clientes']
+            tabla_seg['% del total'] = (tabla_seg['Clientes'] / len(freq_cliente) * 100).apply(lambda x: f"{x:.1f}%")
+            tabla_seg['Clientes'] = tabla_seg['Clientes'].apply(lambda x: f"{x:,}")
+ 
+            st.markdown("""
+            <div style="background:#1c2333; border:1px solid #2a3347; border-radius:8px;
+                        padding:12px; margin-top:16px;">
+                <div style="font-size:0.9rem; font-weight:600; color:#e8eaf0; margin-bottom:8px;">
+                    Segmentación por frecuencia
+                </div>
+            """, unsafe_allow_html=True)
+            st.table(tabla_seg)
+            st.markdown("</div>", unsafe_allow_html=True)
+  
