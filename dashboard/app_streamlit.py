@@ -885,3 +885,114 @@ if auth.tiene_permiso("RF-09") and st.session_state.seccion_activa == "evolucion
                 var_mes['pct_var'] = var_mes['pct_var'].apply(lambda x: f"{x:+.1f}%" if pd.notna(x) else "N/A")
                 st.table(var_mes.rename(columns={'periodo_dt': 'Mes', 'pct_var': 'Variación %'}))
                 st.markdown("</div>", unsafe_allow_html=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# RF-10 — Ticket Promedio (Gerencia y Ventas)
+# Calcula revenue total / cantidad de invoice_id distintos.
+# Solo se renderiza si la sección activa es "ticket".
+# Roles con acceso: gerencia, ventas (según SRS tabla de RFs y casos de uso).
+# ══════════════════════════════════════════════════════════════════════════════
+if auth.tiene_permiso("RF-10") and st.session_state.seccion_activa == "ticket":
+ 
+    if df_filtrado.empty:
+        st.warning("⚠️ No se encontraron transacciones para los filtros seleccionados.")
+    elif 'amount' not in df_filtrado.columns:
+        st.warning("⚠️ No se encontró la columna de monto en los datos.")
+    elif 'invoice_id' not in df_filtrado.columns:
+        st.warning("⚠️ No se encontró la columna de factura (invoice_id) en los datos.")
+    else:
+        # ── Cálculo del ticket promedio ────────────────────────────────────────
+        # Regla de negocio: revenue total / cantidad de invoice_id distintos.
+        # Usamos nunique() para contar facturas únicas, no filas.
+        # Una misma factura puede tener múltiples líneas de producto.
+        revenue_total     = df_filtrado['amount'].sum()
+        facturas_unicas   = df_filtrado['invoice_id'].nunique()
+        ticket_promedio   = revenue_total / facturas_unicas if facturas_unicas > 0 else 0
+ 
+        # ── KPI principal ──────────────────────────────────────────────────────
+        kpi_cols = st.columns(3)
+        kpi_cols[0].metric("Ticket promedio",     f"${ticket_promedio:,.2f}")
+        kpi_cols[1].metric("Revenue total",        f"${revenue_total:,.0f}")
+        kpi_cols[2].metric("Facturas (invoice_id)", f"{facturas_unicas:,}")
+ 
+        st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
+ 
+        # ── Evolución temporal del ticket promedio ─────────────────────────────
+        # Agrupamos por período: para cada período calculamos revenue y facturas
+        # únicas, y derivamos el ticket promedio del período.
+        if tiene_fecha:
+            serie_fecha = pd.to_datetime(df_filtrado[COL_FECHA], errors='coerce')
+ 
+            col_gran, _ = st.columns([1, 3])
+            with col_gran:
+                granularidad_tp = st.selectbox(
+                    "Granularidad",
+                    options=["Diario", "Mensual", "Anual"],
+                    index=1,           # Por defecto: mensual, más representativo para ticket
+                    key="rf10_granularidad",
+                    label_visibility="collapsed",
+                )
+ 
+            freq_map = {"Diario": "D", "Mensual": "M", "Anual": "Y"}
+            freq     = freq_map[granularidad_tp]
+ 
+            # Agrupamos revenue y facturas únicas por período
+            ticket_tiempo = (
+                df_filtrado.groupby(serie_fecha.dt.to_period(freq))
+                .agg(revenue=('amount', 'sum'), facturas=('invoice_id', 'nunique'))
+                .reset_index()
+            )
+            ticket_tiempo.columns = ['periodo', 'revenue', 'facturas']
+            ticket_tiempo['ticket'] = ticket_tiempo.apply(
+                lambda r: r['revenue'] / r['facturas'] if r['facturas'] > 0 else 0, axis=1
+            )
+            ticket_tiempo['periodo_dt'] = ticket_tiempo['periodo'].dt.to_timestamp()
+ 
+            fmt = {'Diario': '%d/%m/%Y', 'Mensual': '%b %Y', 'Anual': '%Y'}
+            ticket_tiempo['label'] = ticket_tiempo['periodo_dt'].dt.strftime(fmt[granularidad_tp])
+ 
+            if ticket_tiempo.empty or ticket_tiempo['ticket'].sum() == 0:
+                st.info("ℹ️ No hay datos para graficar el ticket promedio en el período seleccionado.")
+            else:
+                # Gráfico de líneas con marcadores — permite ver tendencia y puntos exactos
+                fig_ticket = go.Figure()
+                fig_ticket.add_trace(go.Scatter(
+                    x=ticket_tiempo['label'],
+                    y=ticket_tiempo['ticket'],
+                    mode='lines+markers',
+                    line=dict(color='#3ecf8e', width=2),
+                    marker=dict(size=7, color='#3ecf8e', line=dict(color='#1c2333', width=1.5)),
+                    fill='tozeroy',
+                    fillcolor='rgba(62,207,142,0.08)',
+                    hovertemplate='%{x}<br>Ticket promedio: $%{y:,.2f}<extra></extra>',
+                ))
+                aplicar_layout(fig_ticket, f"Evolución del ticket promedio — Vista {granularidad_tp}")
+                fig_ticket.update_layout(xaxis_tickangle=-30, showlegend=False)
+ 
+                card_grafico(f"Evolución del ticket promedio — Vista {granularidad_tp}")
+                st.plotly_chart(fig_ticket, use_container_width=True)
+                st.markdown("</div>", unsafe_allow_html=True)
+ 
+                # ── Tabla resumen con revenue, facturas y ticket por período ───
+                # Permite al usuario ver los números exactos detrás del gráfico.
+                st.markdown("""
+                <div style="background:#1c2333; border:1px solid #2a3347; border-radius:8px;
+                            padding:12px; margin-top:16px;">
+                    <div style="font-size:0.9rem; font-weight:600; color:#e8eaf0; margin-bottom:8px;">
+                        Detalle por período
+                    </div>
+                """, unsafe_allow_html=True)
+ 
+                tabla_tp = ticket_tiempo[['label', 'revenue', 'facturas', 'ticket']].copy()
+                tabla_tp['revenue'] = tabla_tp['revenue'].apply(lambda x: f"${x:,.0f}")
+                tabla_tp['ticket']  = tabla_tp['ticket'].apply(lambda x: f"${x:,.2f}")
+                tabla_tp = tabla_tp.rename(columns={
+                    'label':    'Período',
+                    'revenue':  'Revenue',
+                    'facturas': 'Facturas únicas',
+                    'ticket':   'Ticket promedio',
+                })
+                st.table(tabla_tp)
+                st.markdown("</div>", unsafe_allow_html=True)
+ 
