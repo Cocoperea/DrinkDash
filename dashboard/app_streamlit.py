@@ -1122,3 +1122,264 @@ if auth.tiene_permiso("RF-11") and st.session_state.seccion_activa == "frecuenci
             st.table(tabla_seg)
             st.markdown("</div>", unsafe_allow_html=True)
   
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# RF-12 — Elasticidad precio-demanda (Marketing y Dirección)
+# Relaciona el precio histórico de los productos con las unidades vendidas,
+# filtrable por categoría o marca. Muestra un scatter con línea de tendencia
+# y permite comparar segmentos cambiando la selección (escenario 2 CA).
+# Roles con acceso: marketing, direccion (SRS tabla RFs + casos de uso pág. 25-26).
+# ══════════════════════════════════════════════════════════════════════════════
+if auth.tiene_permiso("RF-12") and st.session_state.seccion_activa == "elasticidad":
+ 
+    cols_requeridas = {'unit_price', 'quantity'}
+    if df_filtrado.empty:
+        st.warning("⚠️ No se encontraron transacciones para los filtros seleccionados.")
+    elif not cols_requeridas.issubset(df_filtrado.columns):
+        faltantes = cols_requeridas - set(df_filtrado.columns)
+        st.warning(f"⚠️ Faltan columnas necesarias para el análisis: {', '.join(faltantes)}.")
+    else:
+        import numpy as np
+ 
+        # ── Selector de dimensión de segmentación ─────────────────────────────
+        # El filtrado de marca/categoría ya lo maneja el sidebar globalmente.
+        # Acá solo elegimos el eje de análisis: ¿queremos ver la curva precio-demanda
+        # desglosada por categoría o por marca? No es un filtro, es una agrupación.
+        opciones_dim = []
+        if 'category' in df_filtrado.columns: opciones_dim.append("Categoría")
+        if 'brand'    in df_filtrado.columns: opciones_dim.append("Marca")
+ 
+        if not opciones_dim:
+            st.warning("⚠️ No se encontraron columnas de categoría ni marca para segmentar el análisis.")
+        else:
+            col_dim, _ = st.columns([1, 5])
+            with col_dim:
+                dimension = st.selectbox(
+                    "Agrupar por",
+                    options=opciones_dim,
+                    index=0,
+                    key="rf12_dimension",
+                )
+            col_dim_key = 'category' if dimension == "Categoría" else 'brand'
+ 
+            segmentos_disponibles = sorted(df_filtrado[col_dim_key].dropna().unique().tolist())
+ 
+            if df_filtrado.empty or df_filtrado['quantity'].sum() == 0:
+                st.info("ℹ️ No hay datos para los filtros seleccionados.")
+            else:
+                # ── Texto introductorio ────────────────────────────────────────
+                # Explica qué mide la elasticidad antes de mostrar cualquier gráfico,
+                # para que el usuario pueda leer los datos sin conocimientos previos.
+                st.markdown("""
+                <div style="background:#1c2333; border:1px solid #2a3347; border-radius:12px;
+                            padding:18px 22px; margin-bottom:16px;">
+                    <div style="font-size:0.82rem; color:#8b95a8; line-height:1.65;">
+                        &bull; Un producto es <strong style="color:#f26b6b;">elástico</strong> cuando una pequeña suba de precio genera
+                        una caída grande en las ventas — los clientes son sensibles al precio y buscan alternativas.<br>
+                        &bull; Un producto es <strong style="color:#3ecf8e;">inelástico</strong> cuando el precio sube pero las ventas
+                        no cambian demasiado — los clientes lo siguen comprando igual porque lo necesitan o no hay sustitutos.
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+ 
+                # ── Agrupación precio-demanda ──────────────────────────────────
+                elasticidad_df = (
+                    df_filtrado.groupby('unit_price')['quantity']
+                    .sum()
+                    .reset_index()
+                    .sort_values('unit_price')
+                )
+                elasticidad_df.columns = ['precio', 'demanda']
+ 
+                # KPIs de contexto
+                precio_min = elasticidad_df['precio'].min()
+                precio_max = elasticidad_df['precio'].max()
+                demanda_precio_min = elasticidad_df.loc[elasticidad_df['precio'].idxmin(), 'demanda']
+                demanda_precio_max = elasticidad_df.loc[elasticidad_df['precio'].idxmax(), 'demanda']
+ 
+                kpi_cols = st.columns(4)
+                with kpi_cols[0]:
+                    st.metric("Precio mínimo", f"${precio_min:,.2f}")
+                    st.caption("Precio unitario más bajo registrado en el período filtrado.")
+                with kpi_cols[1]:
+                    st.metric("Precio máximo", f"${precio_max:,.2f}")
+                    st.caption("Precio unitario más alto registrado en el período filtrado.")
+                with kpi_cols[2]:
+                    st.metric("Demanda @ precio mín.", f"{demanda_precio_min:,.0f} u.")
+                    st.caption("Unidades vendidas cuando el producto tuvo su precio más bajo.")
+                with kpi_cols[3]:
+                    st.metric("Demanda @ precio máx.", f"{demanda_precio_max:,.0f} u.")
+                    st.caption("Unidades vendidas cuando el producto tuvo su precio más alto.")
+ 
+                st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
+ 
+                # ── Scatter con tendencia OLS ──────────────────────────────────
+                fig_el = go.Figure()
+                fig_el.add_trace(go.Scatter(
+                    x=elasticidad_df['precio'],
+                    y=elasticidad_df['demanda'],
+                    mode='markers',
+                    marker=dict(color='#f5a623', size=8, opacity=0.8,
+                                line=dict(color='#1c2333', width=1)),
+                    name='Datos observados',
+                    hovertemplate='Precio: $%{x:,.2f}<br>Unidades vendidas: %{y:,.0f}<extra></extra>',
+                ))
+ 
+                pendiente = None
+                if len(elasticidad_df) >= 2:
+                    x_vals = elasticidad_df['precio'].values
+                    y_vals = elasticidad_df['demanda'].values
+                    coef   = np.polyfit(x_vals, y_vals, 1)
+                    pendiente = coef[0]
+                    x_line = np.linspace(x_vals.min(), x_vals.max(), 100)
+                    fig_el.add_trace(go.Scatter(
+                        x=x_line,
+                        y=np.polyval(coef, x_line),
+                        mode='lines',
+                        line=dict(color='#f26b6b', width=2, dash='dash'),
+                        name='Línea de tendencia',
+                        hoverinfo='skip',
+                    ))
+                    signo_txt = "demanda cae al subir el precio" if pendiente < 0 else "demanda sube al subir el precio"
+                    fig_el.add_annotation(
+                        xref="paper", yref="paper", x=0.98, y=0.96,
+                        text=f"Tendencia: {signo_txt}",
+                        showarrow=False,
+                        font=dict(size=11, color="#8b95a8"),
+                        align="right",
+                    )
+ 
+                aplicar_layout(fig_el, "Relación precio-demanda — Vista general")
+                fig_el.update_layout(
+                    xaxis=dict(gridcolor="#1e2a3a", title="Precio unitario ($)"),
+                    yaxis=dict(gridcolor="#1e2a3a", title="Unidades vendidas"),
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02,
+                                xanchor="right", x=1,
+                                font=dict(color="#8b95a8"), bgcolor="rgba(0,0,0,0)"),
+                )
+ 
+                # Texto explicativo del scatter, adaptado al resultado real de los datos
+                if pendiente is not None:
+                    if pendiente < -0.5:
+                        interpretacion = (
+                            "La línea de tendencia tiene una <strong style='color:#f26b6b;'>pendiente negativa pronunciada</strong>: "
+                            "cuando el precio sube, las ventas caen bastante. Esto indica que los clientes son "
+                            "<strong style='color:#e8eaf0;'>sensibles al precio</strong> — es un producto elástico. "
+                            "Bajar el precio podría aumentar el volumen de ventas significativamente."
+                        )
+                    elif pendiente < 0:
+                        interpretacion = (
+                            "La línea de tendencia tiene una <strong style='color:#f5a623;'>pendiente negativa suave</strong>: "
+                            "el precio afecta las ventas, pero no de forma drástica. "
+                            "Hay cierta sensibilidad al precio, pero los clientes no abandonan el producto fácilmente."
+                        )
+                    else:
+                        interpretacion = (
+                            "La línea de tendencia tiene una <strong style='color:#3ecf8e;'>pendiente positiva o plana</strong>: "
+                            "las ventas no caen al subir el precio, lo que sugiere que este producto es "
+                            "<strong style='color:#e8eaf0;'>inelástico</strong> — los clientes lo compran independientemente del precio. "
+                            "Esto puede indicar fidelidad de marca, falta de sustitutos, o que el precio no es el factor determinante."
+                        )
+                else:
+                    interpretacion = "No hay suficientes puntos de precio distintos para calcular una tendencia."
+ 
+                card_grafico("Relación precio-demanda — Vista general")
+                st.plotly_chart(fig_el, use_container_width=True)
+                st.markdown("</div>", unsafe_allow_html=True)
+ 
+                # Interpretación contextualizada debajo del scatter
+                st.markdown(f"""
+                <div style="background:#161b27; border:1px solid #2a3347; border-left: 3px solid #f5a623;
+                            border-radius:8px; padding:12px 16px; margin-bottom:20px;">
+                    <div style="font-size:0.8rem; color:#8b95a8; line-height:1.6;">
+                        Cada punto amarillo es un precio al que se vendió al menos un producto.
+                        La altura del punto indica cuántas unidades se vendieron a ese precio.
+                        La línea roja punteada es la tendencia general calculada sobre todos los datos.
+                        <br><br>{interpretacion}
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+ 
+                # ── Mapa de calor: segmento × banda de precio ─────────────────
+                # Reemplaza el gráfico de líneas de comparación. Filas = segmentos
+                # (categorías o marcas), columnas = rangos de precio agrupados en bins,
+                # color = unidades vendidas. Permite ver de un vistazo qué segmento
+                # vende más en cada banda de precio, sin el "espagueti" de líneas.
+                if len(segmentos_disponibles) > 1:
+                    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+ 
+                    # Calculamos bins de precio con etiquetas legibles
+                    N_BINS = min(8, df_filtrado['unit_price'].nunique())
+                    df_heat = df_filtrado[[col_dim_key, 'unit_price', 'quantity']].copy()
+                    df_heat['banda_precio'] = pd.cut(
+                        df_heat['unit_price'], bins=N_BINS, precision=0
+                    ).astype(str)
+ 
+                    # Tabla pivote: filas = segmento, columnas = banda de precio
+                    pivot = (
+                        df_heat.groupby([col_dim_key, 'banda_precio'])['quantity']
+                        .sum()
+                        .unstack(fill_value=0)
+                    )
+                    # Ordenamos columnas por valor central del intervalo para que
+                    # aparezcan de menor a mayor precio de izquierda a derecha
+                    pivot = pivot.reindex(
+                        columns=sorted(pivot.columns,
+                                       key=lambda s: float(s.split(',')[0].strip('([ ')))
+                    )
+ 
+                    fig_heat = go.Figure(go.Heatmap(
+                        z=pivot.values,
+                        x=[c.replace('(', '').replace(']', '').replace(', ', '–$').replace(',', '–')
+                           for c in pivot.columns],
+                        y=pivot.index.tolist(),
+                        colorscale=[
+                            [0.0,  'rgba(0,0,0,0)'],  # Cero: transparente, el fondo oscuro se ve a través
+                            [0.01, '#4f8ef7'],         # Apenas por encima de cero: azul del tema, ya visible
+                            [0.35, '#7dabf9'],         # Ventas medias: azul medio-claro
+                            [0.7,  '#aecbfb'],         # Ventas altas: azul muy claro
+                            [1.0,  '#ffffff'],         # Máximo: blanco
+                        ],
+                        hoverongaps=False,
+                        hovertemplate=(
+                            f'{dimension}: %{{y}}<br>'
+                            'Banda de precio: $%{x}<br>'
+                            'Unidades vendidas: %{z:,}<extra></extra>'
+                        ),
+                        colorbar=dict(
+                            title=dict(text="Unidades", font=dict(color="#8b95a8", size=11)),
+                            tickfont=dict(color="#8b95a8"),
+                            bgcolor="rgba(0,0,0,0)",
+                            outlinecolor="#2a3347",
+                        ),
+                    ))
+                    aplicar_layout(fig_heat, f"Unidades vendidas por {dimension.lower()} y banda de precio")
+                    fig_heat.update_layout(
+                        xaxis=dict(title=f"Banda de precio ($)", gridcolor="#1e2a3a", tickangle=-30),
+                        yaxis=dict(title=dimension, gridcolor="rgba(0,0,0,0)"),
+                        margin=dict(l=40, r=20, t=50, b=80),
+                    )
+ 
+                    card_grafico(f"Mapa de calor — Ventas por {dimension.lower()} y rango de precio")
+                    st.plotly_chart(fig_heat, use_container_width=True)
+                    st.markdown("</div>", unsafe_allow_html=True)
+ 
+                    # Texto explicativo del heatmap
+                    st.markdown(f"""
+                    <div style="background:#161b27; border:1px solid #2a3347; border-left: 3px solid #4f8ef7;
+                                border-radius:8px; padding:12px 16px; margin-bottom:8px;">
+                        <div style="font-size:0.8rem; color:#8b95a8; line-height:1.6;">
+                            Cada fila es una {dimension.lower()} y cada columna es un rango de precio.
+                            El color de cada celda indica cuántas unidades se vendieron en esa combinación:
+                            <strong style="color:#ffffff;">blanco = muchas ventas</strong>,
+                            <strong style="color:#7dabf9;">azul claro = ventas moderadas</strong>,
+                            <strong style="color:#8b95a8;">sin color = sin ventas</strong>.
+                            <br><br>
+                            Buscá las celdas más claras para identificar en qué rango de precio
+                            cada {dimension.lower()} tiene su mayor volumen de ventas.
+                            Si una {dimension.lower()} vende bien en precios bajos pero casi nada en precios altos,
+                            es muy sensible al precio. Si vende parejo en todos los rangos, es menos sensible.
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True) 
