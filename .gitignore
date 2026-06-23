@@ -6,4 +6,7 @@ __pycache__/
 *.pyc
 *.db
 data/drinkdash.db
-data/input_csv/procesado_*
+airflow/logs/
+airflow/plugins/
+airflow/__pycache__/
+data/
