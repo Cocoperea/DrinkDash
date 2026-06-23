@@ -5,9 +5,9 @@ venv/
 __pycache__/
 *.pyc
 *.db
+*.csv
 data/drinkdash.db
 airflow/logs/
 airflow/plugins/
 airflow/__pycache__/
 data/
-hello_airflow.py
