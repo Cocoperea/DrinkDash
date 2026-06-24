@@ -1383,3 +1383,82 @@ if auth.tiene_permiso("RF-12") and st.session_state.seccion_activa == "elasticid
                         </div>
                     </div>
                     """, unsafe_allow_html=True) 
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# RF-14 —Análisis de patrones estacionales (solo Dirección y Marketing)
+# Visualiza variaciones y tendencias de ventas según períodos temporales para identificar comportamientos estacionales.
+# El sistema permite analizar tendencias según: mes,semana,día o franja temporal.
+# ══════════════════════════════════════════════════════════════════════════════
+if auth.tiene_permiso("RF-14") and st.session_state.seccion_activa == "estacionalidad":
+    if df_filtrado.empty:
+        st.warning("⚠️ No se encontraron transacciones para los filtros seleccionados.")
+    elif 'amount' not in df_filtrado.columns:
+        st.warning("⚠️ No se encontró la columna de monto en los datos.")
+    elif not tiene_fecha:
+        st.warning("⚠️ No se encontró la columna de fecha en los datos.")
+    else:
+        # ── Selector de granularidad temporal ───────────────────────────────
+        col_gran, _ = st.columns([1, 3])
+        with col_gran:
+            granularidad_est = st.selectbox(
+                "Granularidad",
+                options=["Mensual", "Semanal", "Diaria"],
+                index=0,
+                key="rf14_granularidad",
+                label_visibility="collapsed",
+            )
+        # ── Agrupación de datos según granularidad ─────────────────────────────
+        if granularidad_est == "Mensual":
+            df_filtrado['periodo'] = pd.to_datetime(df_filtrado[COL_FECHA]).dt.to_period('M')
+            revenue_mes = (
+                df_filtrado.groupby('periodo')['amount']
+                .sum()
+                .reset_index()
+            )
+            revenue_mes.columns = ['periodo', 'revenue']
+            revenue_mes['periodo_dt'] = revenue_mes['periodo'].dt.to_timestamp()
+        elif granularidad_est == "Semanal":
+            df_filtrado['periodo'] = pd.to_datetime(df_filtrado[COL_FECHA]).dt.to_period('W')
+            revenue_mes = (
+                df_filtrado.groupby('periodo')['amount']
+                .sum()
+                .reset_index()
+            )
+            revenue_mes.columns = ['periodo', 'revenue']
+            revenue_mes['periodo_dt'] = revenue_mes['periodo'].dt.to_timestamp()
+        else:
+            df_filtrado['periodo'] = pd.to_datetime(df_filtrado[COL_FECHA]).dt.to_period('D')
+            revenue_mes = (
+                df_filtrado.groupby('periodo')['amount']
+                .sum()
+                .reset_index()
+            )
+            revenue_mes.columns = ['periodo', 'revenue']
+            revenue_mes['periodo_dt'] = revenue_mes['periodo'].dt.to_timestamp()
+        
+        # ── Cálculo de variación porcentual ───────────────────────────────
+        revenue_mes['pct_var'] = revenue_mes['revenue'].pct_change() * 100
+        revenue_mes = revenue_mes.dropna(subset=['pct_var'])
+
+        if revenue_mes.empty or revenue_mes['revenue'].sum() == 0:
+            st.info("ℹ️ No hay datos de revenue para el período seleccionado.")
+        else:
+            # ── Gráfico de línea con variación porcentual ─────────────────────
+            fig_est = go.Figure()
+            fig_est.add_trace(go.Scatter(
+                x=revenue_mes['periodo_dt'],
+                y=revenue_mes['revenue'],
+                mode='lines+markers',
+                line=dict(color='#3ecf8e', width=2),
+                marker=dict(size=7, color='#3ecf8e', line=dict(color='#1c2333', width=1.5)),
+                fill='tozeroy',
+                fillcolor='rgba(62,207,142,0.08)',
+                hovertemplate='%{x|%d/%m/%Y}<br>Revenue: $%{y:,.0f}<extra></extra>',
+            ))
+            aplicar_layout(fig_est, f"Evolución del revenue — Vista {granularidad_est}")
+            fig_est.update_layout(xaxis_tickangle=-30, showlegend=False)
+
+            card_grafico(f"Evolución del revenue — Vista {granularidad_est}")
+            st.plotly_chart(fig_est, use_container_width=True)
+            st.markdown("</div>", unsafe_allow_html=True)
