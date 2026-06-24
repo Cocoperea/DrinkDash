@@ -268,7 +268,6 @@ NAV_POR_ROL = {
         ("descuentos", "Análisis de descuentos"),
         ("frecuencia",     "Frecuencia de compra"),
         ("elasticidad",    "Elasticidad precio-demanda"),
-        ("marcas",         "Preferencias de marca"),
         ("estacionalidad", "Estacionalidad"),
         
     ],
@@ -288,8 +287,13 @@ nav_items = NAV_POR_ROL.get(ROL, [])
 # Inicializamos la sección activa en session_state la primera vez.
 # session_state persiste entre reruns de Streamlit dentro de la misma sesión,
 # por lo que recordamos qué sección eligió el usuario.
-if "seccion_activa" not in st.session_state:
+# Usamos una clave compuesta con el rol para que al cambiar de rol se resetee.
+_init_key = f"seccion_init_{ROL}"
+if "seccion_activa" not in st.session_state or _init_key not in st.session_state:
     st.session_state.seccion_activa = nav_items[0][0] if nav_items else "resumen"
+    st.session_state[_init_key] = True
+
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # SIDEBAR
@@ -324,22 +328,14 @@ with st.sidebar:
         unsafe_allow_html=True
     )
 
-    # ── Botones de navegación ──────────────────────────────────────────────────
-    # Por cada ítem del menú del rol, creamos un botón de Streamlit.
-    # Al hacer clic, guardamos la clave en session_state y forzamos un rerun
-    # para que el contenido principal se actualice mostrando la sección elegida.
-    for key, label in nav_items:
-        if st.button(label, key=f"nav_{key}", use_container_width=True):
-            st.session_state.seccion_activa = key
-            st.rerun()
-
-    # ── CSS específico para los botones del sidebar ────────────────────────────
-    # Los botones de navegación deben verse como ítems de menú (sin borde,
-    # fondo transparente, alineados a la izquierda), no como botones normales.
-    # Este bloque CSS sobreescribe solo los botones dentro del sidebar,
-    # sin afectar a los botones del resto de la app.
+    # ── Botones de navegación con estado activo resaltado ─────────────────────
+    # Para el ítem activo renderizamos un div HTML estático (no clickeable como botón
+    # pero visualmente destacado). Para los demás, usamos st.button normal.
+    # El CSS de abajo unifica el estilo de todos los botones del sidebar y
+    # agrega la clase .nav-active para el ítem seleccionado.
     st.markdown("""
     <style>
+    /* ── Botones de navegación del sidebar ── */
     [data-testid="stSidebar"] [data-testid="stButton"] > button {
         background: transparent !important;
         border: none !important;
@@ -350,14 +346,43 @@ with st.sidebar:
         color: #8b95a8 !important;
         font-size: 0.875rem !important;
         font-weight: 400 !important;
+        transition: background 0.15s, color 0.15s !important;
     }
     [data-testid="stSidebar"] [data-testid="stButton"] > button:hover {
         background: rgba(79,142,247,0.08) !important;
         color: #e8eaf0 !important;
         border: none !important;
     }
+    /* ── Ítem activo ── */
+    .nav-active {
+        display: block;
+        background: rgba(79,142,247,0.13) !important;
+        border-left: 3px solid #4f8ef7 !important;
+        border-radius: 8px !important;
+        padding: 8px 16px 8px 13px !important;
+        color: #4f8ef7 !important;
+        font-size: 0.875rem !important;
+        font-weight: 600 !important;
+        margin-bottom: 2px;
+        cursor: default;
+        user-select: none;
+        box-sizing: border-box;
+        width: 100%;
+    }
     </style>
     """, unsafe_allow_html=True)
+
+    for key, label in nav_items:
+        if st.session_state.seccion_activa == key:
+            # Ítem activo: div HTML con resaltado, no es un botón clickeable
+            st.markdown(
+                f'<span class="nav-active">● &nbsp;{label}</span>',
+                unsafe_allow_html=True,
+            )
+        else:
+            if st.button(label, key=f"nav_{key}", use_container_width=True):
+                st.session_state.seccion_activa = key
+                st.rerun()
 
     # ── Espaciador visual ──────────────────────────────────────────────────────
     st.markdown('<div style="flex:1; min-height:40px;"></div>', unsafe_allow_html=True)
@@ -580,10 +605,18 @@ if auth.tiene_permiso("RF-04") and st.session_state.seccion_activa == "resumen":
             ticket_promedio = df_filtrado['amount'].mean()
             n_transacciones = len(df_filtrado)
 
-            kpi_cols[0].metric("Revenue total",    f"${revenue_total:,.0f}")
-            kpi_cols[1].metric("Unidades vendidas", f"{unidades_total:,.0f}")
-            kpi_cols[2].metric("Ticket promedio",   f"${ticket_promedio:,.1f}")
-            kpi_cols[3].metric("Transacciones",     f"{n_transacciones:,}")
+            with kpi_cols[0]:
+                st.metric("Revenue total", f"${revenue_total:,.0f}")
+                st.caption("Suma de todos los montos vendidos en el período filtrado.")
+            with kpi_cols[1]:
+                st.metric("Unidades vendidas", f"{unidades_total:,.0f}")
+                st.caption("Total de unidades de producto despachadas.")
+            with kpi_cols[2]:
+                st.metric("Ticket promedio", f"${ticket_promedio:,.1f}")
+                st.caption("Monto promedio por transacción (fila de venta).")
+            with kpi_cols[3]:
+                st.metric("Transacciones", f"{n_transacciones:,}")
+                st.caption("Cantidad de líneas de venta registradas en el período.")
 
             # Espaciado visual entre KPIs y gráfico
             st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
@@ -608,7 +641,7 @@ if auth.tiene_permiso("RF-04") and st.session_state.seccion_activa == "resumen":
                         granularidad = st.selectbox(
                             "Granularidad",
                             options=["Diario", "Mensual", "Anual"],
-                            index=0,
+                            index=1,
                             key="rf04_granularidad",
                             label_visibility="collapsed",
                         )
@@ -646,6 +679,11 @@ if auth.tiene_permiso("RF-04") and st.session_state.seccion_activa == "resumen":
 
                     # Envolvemos el gráfico en una tarjeta HTML oscura
                     card_grafico("Evolución de ventas — Revenue mensual")
+                    st.markdown(
+                        '<p style="font-size:0.8rem; color:#8b95a8; padding: 0 4px 8px;">'
+                        'Tendencia del revenue acumulado en el período. Usá el selector de granularidad para ver diario, mensual o anual.</p>',
+                        unsafe_allow_html=True,
+                    )
                     st.plotly_chart(fig_area, use_container_width=True)
                     st.markdown("</div>", unsafe_allow_html=True)
                 else:
@@ -690,6 +728,11 @@ if auth.tiene_permiso("RF-05") and st.session_state.seccion_activa == "horario":
                     showlegend=False,
                 )
                 card_grafico("Ventas por franja horaria")
+                st.markdown(
+                    '<p style="font-size:0.8rem; color:#8b95a8; padding: 0 4px 8px;">'
+                    'Cantidad de transacciones agrupadas por hora del día. Identificá los picos de actividad para optimizar operaciones.</p>',
+                    unsafe_allow_html=True,
+                )
                 st.plotly_chart(fig_hora, use_container_width=True)
                 st.markdown("</div>", unsafe_allow_html=True)
 
@@ -705,34 +748,59 @@ if auth.tiene_permiso("RF-06") and st.session_state.seccion_activa == "cantidade
         elif 'quantity' not in df_filtrado.columns:
             st.warning("⚠️ No se encontró la columna de cantidad en los datos.")
         else:
-            cantidades_tiempo = (
-                df_filtrado['quantity']
-                .groupby(pd.to_datetime(df_filtrado[COL_FECHA], errors='coerce').dt.to_period('D'))
-                .sum()
-                .reset_index()
+            # ── Selector de granularidad ───────────────────────────────────────
+            st.markdown(
+                '<p style="font-size:0.8rem; color:#8b95a8; margin-bottom:4px;">'
+                'Evolución temporal de las unidades vendidas. Podés cambiar la agrupación para ver el detalle diario, '
+                'la tendencia mensual o el resumen anual.</p>',
+                unsafe_allow_html=True,
             )
-            cantidades_tiempo.columns = ['periodo', 'cantidad']
-            cantidades_tiempo['periodo_dt'] = cantidades_tiempo['periodo'].dt.to_timestamp()
-            cantidades_tiempo['label'] = cantidades_tiempo['periodo_dt'].dt.strftime('%d/%m/%Y')
+            col_gran_cant, _ = st.columns([1, 3])
+            with col_gran_cant:
+                gran_cant = st.selectbox(
+                    "Granularidad",
+                    options=["Diario", "Mensual", "Anual"],
+                    index=1,
+                    key="rf06_granularidad",
+                    label_visibility="collapsed",
+                )
+            freq_map_cant = {"Diario": ("D", '%d/%m/%Y'), "Mensual": ("M", '%b %Y'), "Anual": ("Y", '%Y')}
+            freq_cant, fmt_cant = freq_map_cant[gran_cant]
 
-            if cantidades_tiempo.empty or cantidades_tiempo['cantidad'].sum() == 0:
-                st.info("ℹ️ No hay datos de cantidades vendidas para graficar en el período seleccionado.")
+            serie_fecha_cant = pd.to_datetime(df_filtrado[COL_FECHA], errors='coerce') if tiene_fecha else None
+
+            if serie_fecha_cant is None:
+                st.warning("⚠️ No se encontró la columna de fecha en los datos.")
             else:
-                fig_cant = go.Figure()
-                fig_cant.add_trace(go.Scatter(
-                    x=cantidades_tiempo['label'],
-                    y=cantidades_tiempo['cantidad'],
-                    mode='lines',
-                    fill='tozeroy',
-                    line=dict(color='#4f8ef7', width=2),
-                    fillcolor='rgba(79,142,247,0.12)',
-                    hovertemplate='%{x}<br>Cantidad: %{y}<extra></extra>',
-                ))
-                aplicar_layout(fig_cant, "Evolución de cantidades vendidas")
-                fig_cant.update_layout(xaxis_tickangle=-30, showlegend=False)
-                card_grafico("Evolución de cantidades vendidas")
-                st.plotly_chart(fig_cant, use_container_width=True)
-                st.markdown("</div>", unsafe_allow_html=True)
+                cantidades_tiempo = (
+                    df_filtrado['quantity']
+                    .groupby(serie_fecha_cant.dt.to_period(freq_cant))
+                    .sum()
+                    .reset_index()
+                )
+                cantidades_tiempo.columns = ['periodo', 'cantidad']
+                cantidades_tiempo['periodo_dt'] = cantidades_tiempo['periodo'].dt.to_timestamp()
+                cantidades_tiempo['label'] = cantidades_tiempo['periodo_dt'].dt.strftime(fmt_cant)
+
+                if cantidades_tiempo.empty or cantidades_tiempo['cantidad'].sum() == 0:
+                    st.info("ℹ️ No hay datos de cantidades vendidas para graficar en el período seleccionado.")
+                else:
+                    fig_cant = go.Figure()
+                    fig_cant.add_trace(go.Scatter(
+                        x=cantidades_tiempo['label'],
+                        y=cantidades_tiempo['cantidad'],
+                        mode='lines+markers',
+                        fill='tozeroy',
+                        line=dict(color='#4f8ef7', width=2),
+                        marker=dict(size=5, color='#4f8ef7'),
+                        fillcolor='rgba(79,142,247,0.12)',
+                        hovertemplate='%{x}<br>Cantidad: %{y:,}<extra></extra>',
+                    ))
+                    aplicar_layout(fig_cant, f"Evolución de cantidades vendidas — Vista {gran_cant}")
+                    fig_cant.update_layout(xaxis_tickangle=-30, showlegend=False)
+                    card_grafico(f"Evolución de cantidades vendidas — Vista {gran_cant}")
+                    st.plotly_chart(fig_cant, use_container_width=True)
+                    st.markdown("</div>", unsafe_allow_html=True)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -748,6 +816,11 @@ if auth.tiene_permiso("RF-07") and st.session_state.seccion_activa == "ranking":
             st.warning("⚠️ No se encontraron las columnas necesarias para generar el ranking.")
         else:
             # Controles de cantidad de productos a mostrar y criterio de ordenamiento
+            st.markdown(
+                '<p style="font-size:0.8rem; color:#8b95a8; margin-bottom:8px;">'
+                'Productos ordenados por unidades vendidas. Cambiá el orden para ver los más o menos vendidos y ajustá cuántos mostrar.</p>',
+                unsafe_allow_html=True,
+            )
             col_top, col_orden, _ = st.columns([1, 2, 3])
             with col_top:
                 top_n = st.selectbox("Mostrar", options=[5, 10, 20, 50], index=0, key="rf07_top_n")
@@ -780,7 +853,7 @@ if auth.tiene_permiso("RF-07") and st.session_state.seccion_activa == "ranking":
                     marker_color='#4f8ef7',
                     hovertemplate='%{y}<br>Unidades: %{x:,}<extra></extra>',
                 ))
-                aplicar_layout(fig_ranking, f"Top {top_n} Productos más vendidos")
+                aplicar_layout(fig_ranking, f"{'Top' if not ascending else 'Bottom'} {top_n} productos — {'más' if not ascending else 'menos'} vendidos")
                 # categoryorder controla el orden visual de las barras en el eje Y
                 fig_ranking.update_layout(
                     yaxis=dict(
@@ -790,7 +863,12 @@ if auth.tiene_permiso("RF-07") and st.session_state.seccion_activa == "ranking":
                     xaxis=dict(gridcolor="#1e2a3a"),
                     showlegend=False,
                 )
-                card_grafico(f"Top {top_n} productos más vendidos")
+                titulo_ranking = (
+                    f"Top {top_n} productos más vendidos"
+                    if not ascending
+                    else f"Bottom {top_n} productos menos vendidos"
+                )
+                card_grafico(titulo_ranking)
                 st.plotly_chart(fig_ranking, use_container_width=True)
                 st.markdown("</div>", unsafe_allow_html=True)
 
@@ -802,33 +880,73 @@ if auth.tiene_permiso("RF-08") and st.session_state.seccion_activa == "descuento
 
         if df_filtrado.empty:
             st.warning("⚠️ No se encontraron transacciones para los filtros seleccionados.")
-        elif 'revenue_sacrificado' not in df_filtrado.columns or 'revenue_bruto' not in df_filtrado.columns:
-            st.warning("⚠️ No se encontraron las columnas necesarias para analizar descuentos.")
         else:
-            total_sacrificado = df_filtrado['revenue_sacrificado'].sum()
-            total_bruto = df_filtrado['revenue_bruto'].sum()
-            total_real = total_bruto - total_sacrificado
-            
-            fig_descuentos = go.Figure(go.Waterfall(
-                name="Descuentos",
-                orientation="v",
-                measure=["absolute", "relative", "total"],
-                x=["Revenue bruto", "Descuentos", "Revenue real"],
-                y=[total_bruto, -total_sacrificado, total_real],
-                text=[f"${total_bruto:,.0f}", f"-${total_sacrificado:,.0f}", f"${total_real:,.0f}"],
-                textposition="outside",
-                increasing=dict(marker=dict(color='#4f8ef7')),
-                decreasing=dict(marker=dict(color='#e53e3e')),
-                totals=dict(marker=dict(color='#2a3347')),
-            ))
-            aplicar_layout(fig_descuentos, "Impacto de los descuentos sobre el revenue")   
-            fig_descuentos.update_layout(
-                yaxis=dict(gridcolor="#1e2a3a"),
-                showlegend=False,
-            )
-            card_grafico("Análisis de descuentos")
-            st.plotly_chart(fig_descuentos, use_container_width=True)
-            st.markdown("</div>", unsafe_allow_html=True)
+            # Detectamos columnas de descuento disponibles
+            tiene_rev_sacrificado = 'revenue_sacrificado' in df_filtrado.columns
+            tiene_rev_bruto = 'revenue_bruto' in df_filtrado.columns
+            tiene_discount = 'discount' in df_filtrado.columns or 'discount_amount' in df_filtrado.columns
+            tiene_amount = 'amount' in df_filtrado.columns
+
+            col_discount = 'discount' if 'discount' in df_filtrado.columns else ('discount_amount' if 'discount_amount' in df_filtrado.columns else None)
+
+            if not tiene_rev_sacrificado and not tiene_rev_bruto and not tiene_discount:
+                st.warning("⚠️ No se encontraron columnas de descuentos en los datos (se esperan: revenue_sacrificado, revenue_bruto o discount).")
+            else:
+                # Calculamos los totales según las columnas disponibles
+                if tiene_rev_sacrificado and tiene_rev_bruto:
+                    total_sacrificado = df_filtrado['revenue_sacrificado'].sum()
+                    total_bruto = df_filtrado['revenue_bruto'].sum()
+                    total_real = df_filtrado['amount'].sum() if tiene_amount else total_bruto - total_sacrificado
+                elif col_discount and tiene_amount:
+                    total_sacrificado = df_filtrado[col_discount].sum()
+                    total_real = df_filtrado['amount'].sum()
+                    total_bruto = total_real + total_sacrificado
+                else:
+                    st.warning("⚠️ No hay suficientes columnas para calcular el impacto de descuentos.")
+                    st.stop()
+
+                pct_descuento = (total_sacrificado / total_bruto * 100) if total_bruto > 0 else 0
+
+                # KPIs de contexto
+                st.markdown(
+                    '<p style="font-size:0.8rem; color:#8b95a8; margin-bottom:12px;">'
+                    'Impacto económico de los descuentos aplicados: cuánto revenue potencial se resignó '
+                    'y qué porcentaje representa sobre el revenue bruto total.</p>',
+                    unsafe_allow_html=True,
+                )
+                kpi_cols = st.columns(3)
+                kpi_cols[0].metric("Revenue bruto", f"${total_bruto:,.0f}")
+                kpi_cols[1].metric("Descuentos aplicados", f"${total_sacrificado:,.0f}")
+                kpi_cols[2].metric("Revenue real (neto)", f"${total_real:,.0f}")
+                st.markdown(
+                    f'<p style="font-size:0.8rem; color:#8b95a8; margin-top:6px; margin-bottom:16px;">'
+                    f'Los descuentos representan el <strong style="color:#f26b6b;">{pct_descuento:.1f}%</strong> del revenue bruto total.</p>',
+                    unsafe_allow_html=True,
+                )
+
+                if total_bruto == 0:
+                    st.info("ℹ️ No hay revenue registrado para el período seleccionado.")
+                else:
+                    fig_descuentos = go.Figure(go.Waterfall(
+                        name="Descuentos",
+                        orientation="v",
+                        measure=["absolute", "relative", "total"],
+                        x=["Revenue bruto", "Descuentos aplicados", "Revenue neto"],
+                        y=[total_bruto, -total_sacrificado, total_real],
+                        text=[f"${total_bruto:,.0f}", f"-${total_sacrificado:,.0f}", f"${total_real:,.0f}"],
+                        textposition="outside",
+                        increasing=dict(marker=dict(color='#4f8ef7')),
+                        decreasing=dict(marker=dict(color='#f26b6b')),
+                        totals=dict(marker=dict(color='#3ecf8e')),
+                    ))
+                    aplicar_layout(fig_descuentos, "Impacto de los descuentos sobre el revenue")
+                    fig_descuentos.update_layout(
+                        yaxis=dict(gridcolor="#1e2a3a"),
+                        showlegend=False,
+                    )
+                    card_grafico("Análisis de descuentos — Waterfall revenue bruto vs. neto")
+                    st.plotly_chart(fig_descuentos, use_container_width=True)
+                    st.markdown("</div>", unsafe_allow_html=True)
 
                 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -912,9 +1030,15 @@ if auth.tiene_permiso("RF-10") and st.session_state.seccion_activa == "ticket":
  
         # ── KPI principal ──────────────────────────────────────────────────────
         kpi_cols = st.columns(3)
-        kpi_cols[0].metric("Ticket promedio",     f"${ticket_promedio:,.2f}")
-        kpi_cols[1].metric("Revenue total",        f"${revenue_total:,.0f}")
-        kpi_cols[2].metric("Facturas (invoice_id)", f"{facturas_unicas:,}")
+        with kpi_cols[0]:
+            st.metric("Ticket promedio", f"${ticket_promedio:,.2f}")
+            st.caption("Revenue total dividido facturas únicas del período.")
+        with kpi_cols[1]:
+            st.metric("Revenue total", f"${revenue_total:,.0f}")
+            st.caption("Suma de montos de todas las ventas del período.")
+        with kpi_cols[2]:
+            st.metric("Facturas (invoice_id)", f"{facturas_unicas:,}")
+            st.caption("Cantidad de facturas (pedidos) distintos registrados.")
  
         st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
  
@@ -1028,10 +1152,18 @@ if auth.tiene_permiso("RF-11") and st.session_state.seccion_activa == "frecuenci
         else:
             # ── KPIs de contexto ───────────────────────────────────────────────
             kpi_cols = st.columns(4)
-            kpi_cols[0].metric("Clientes únicos",         f"{len(freq_cliente):,}")
-            kpi_cols[1].metric("Frecuencia promedio",     f"{freq_cliente['compras'].mean():.1f} compras")
-            kpi_cols[2].metric("Máx. compras (un cliente)", f"{freq_cliente['compras'].max():,}")
-            kpi_cols[3].metric("Clientes recurrentes (>1)", f"{(freq_cliente['compras'] > 1).sum():,}")
+            with kpi_cols[0]:
+                st.metric("Clientes únicos", f"{len(freq_cliente):,}")
+                st.caption("Total de customer_id distintos en el período.")
+            with kpi_cols[1]:
+                st.metric("Frecuencia promedio", f"{freq_cliente['compras'].mean():.1f} compras")
+                st.caption("Promedio de facturas por cliente.")
+            with kpi_cols[2]:
+                st.metric("Máx. compras (un cliente)", f"{freq_cliente['compras'].max():,}")
+                st.caption("El cliente más activo del período.")
+            with kpi_cols[3]:
+                st.metric("Clientes recurrentes (>1)", f"{(freq_cliente['compras'] > 1).sum():,}")
+                st.caption("Clientes con más de una compra registrada.")
  
             st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
  
