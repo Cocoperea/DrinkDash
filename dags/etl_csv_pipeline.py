@@ -36,22 +36,23 @@ def _procesar_csv_a_sqlite():
          
         # 1. Eliminación de nulos usando el nombre real de la columna
         df = df.dropna(subset=['invoice_id', 'purchase_datetime', 'amount', 'sku']) #Borro cualquier fila que tenga datos vacíos en esas columnas
-        
-        # 2. Eliminación de duplicados
-        df = df.drop_duplicates(subset=['invoice_id', 'sku']) 
-        
-        # 3. Validación de cantidades y precios mayores a cero
+
+        # 2. Validación de cantidades y precios mayores a cero
         df = df[(df['quantity'] > 0) & (df['unit_price'] > 0)] 
         
+        # 3. Redondeo de montos y porcentajes a 2 decimales
+        df['amount'] = df['amount'].round(2)  # Redondeo el monto a 2 decimales
+        df['discount_pct'] = df['discount_pct'].round(2)  # Redondeo el porcentaje de descuento a 2 decimales
+
         # 4. Validación de consistencia del monto final
-        monto_calculado = df['unit_price'] * df['quantity'] * (1 - df['discount_pct'])
+        monto_calculado = np.round(df['unit_price'] * df['quantity'] * (1 - df['discount_pct'] / 100), 2) #calculo el monto esperado con los datos de la fila
         df = df[np.isclose(df['amount'], monto_calculado, atol=0.01)] #verifico que el monto cobrado sea casi igual al calculado con np.isclose
         
         # 5. Enriquecimiento para los dashboards
         df['purchase_datetime'] = pd.to_datetime(df['purchase_datetime'])
         df['purchase_hour'] = df['purchase_datetime'].dt.hour #creo columna y guardo la hora
-        df['revenue_bruto'] = df['unit_price'] * df['quantity'] #calculo el revenue bruto 
-        df['revenue_sacrificado'] = df['revenue_bruto'] - df['amount'] #calculo el revenue sacrificado
+        df['gross_revenue'] = np.round(df['unit_price'] * df['quantity'], 2)
+        df['sacrificed_revenue'] = np.round(df['gross_revenue'] - df['amount'], 2) 
         
         # LOAD
         #abro la conexion e inserto la tabla, si ya existe solo agrega las nuevas ventas
@@ -59,7 +60,7 @@ def _procesar_csv_a_sqlite():
         df.to_sql('ventas_procesadas', conn, if_exists='append', index=False)
         conn.close()
         
-        #renombro para no volver a procesar
+        # renombro para no volver a procesar
         ruta_procesado = os.path.join(INPUT_DIR, f"procesado_{archivo}")
         os.rename(ruta_completa, ruta_procesado)
         print(f"Archivo cargado en la base de datos: {DB_PATH}")

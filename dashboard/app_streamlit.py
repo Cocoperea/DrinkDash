@@ -880,73 +880,33 @@ if auth.tiene_permiso("RF-08") and st.session_state.seccion_activa == "descuento
 
         if df_filtrado.empty:
             st.warning("⚠️ No se encontraron transacciones para los filtros seleccionados.")
+        elif 'sacrificed_revenue' not in df_filtrado.columns or 'gross_revenue' not in df_filtrado.columns:
+            st.warning("⚠️ No se encontraron las columnas necesarias para analizar descuentos.")
         else:
-            # Detectamos columnas de descuento disponibles
-            tiene_rev_sacrificado = 'revenue_sacrificado' in df_filtrado.columns
-            tiene_rev_bruto = 'revenue_bruto' in df_filtrado.columns
-            tiene_discount = 'discount' in df_filtrado.columns or 'discount_amount' in df_filtrado.columns
-            tiene_amount = 'amount' in df_filtrado.columns
-
-            col_discount = 'discount' if 'discount' in df_filtrado.columns else ('discount_amount' if 'discount_amount' in df_filtrado.columns else None)
-
-            if not tiene_rev_sacrificado and not tiene_rev_bruto and not tiene_discount:
-                st.warning("⚠️ No se encontraron columnas de descuentos en los datos (se esperan: revenue_sacrificado, revenue_bruto o discount).")
-            else:
-                # Calculamos los totales según las columnas disponibles
-                if tiene_rev_sacrificado and tiene_rev_bruto:
-                    total_sacrificado = df_filtrado['revenue_sacrificado'].sum()
-                    total_bruto = df_filtrado['revenue_bruto'].sum()
-                    total_real = df_filtrado['amount'].sum() if tiene_amount else total_bruto - total_sacrificado
-                elif col_discount and tiene_amount:
-                    total_sacrificado = df_filtrado[col_discount].sum()
-                    total_real = df_filtrado['amount'].sum()
-                    total_bruto = total_real + total_sacrificado
-                else:
-                    st.warning("⚠️ No hay suficientes columnas para calcular el impacto de descuentos.")
-                    st.stop()
-
-                pct_descuento = (total_sacrificado / total_bruto * 100) if total_bruto > 0 else 0
-
-                # KPIs de contexto
-                st.markdown(
-                    '<p style="font-size:0.8rem; color:#8b95a8; margin-bottom:12px;">'
-                    'Impacto económico de los descuentos aplicados: cuánto revenue potencial se resignó '
-                    'y qué porcentaje representa sobre el revenue bruto total.</p>',
-                    unsafe_allow_html=True,
-                )
-                kpi_cols = st.columns(3)
-                kpi_cols[0].metric("Revenue bruto", f"${total_bruto:,.0f}")
-                kpi_cols[1].metric("Descuentos aplicados", f"${total_sacrificado:,.0f}")
-                kpi_cols[2].metric("Revenue real (neto)", f"${total_real:,.0f}")
-                st.markdown(
-                    f'<p style="font-size:0.8rem; color:#8b95a8; margin-top:6px; margin-bottom:16px;">'
-                    f'Los descuentos representan el <strong style="color:#f26b6b;">{pct_descuento:.1f}%</strong> del revenue bruto total.</p>',
-                    unsafe_allow_html=True,
-                )
-
-                if total_bruto == 0:
-                    st.info("ℹ️ No hay revenue registrado para el período seleccionado.")
-                else:
-                    fig_descuentos = go.Figure(go.Waterfall(
-                        name="Descuentos",
-                        orientation="v",
-                        measure=["absolute", "relative", "total"],
-                        x=["Revenue bruto", "Descuentos aplicados", "Revenue neto"],
-                        y=[total_bruto, -total_sacrificado, total_real],
-                        text=[f"${total_bruto:,.0f}", f"-${total_sacrificado:,.0f}", f"${total_real:,.0f}"],
-                        textposition="outside",
-                        increasing=dict(marker=dict(color='#4f8ef7')),
-                        decreasing=dict(marker=dict(color='#f26b6b')),
-                        totals=dict(marker=dict(color='#3ecf8e')),
-                    ))
-                    aplicar_layout(fig_descuentos, "Impacto de los descuentos sobre el revenue")
-                    fig_descuentos.update_layout(
-                        yaxis=dict(gridcolor="#1e2a3a"),
-                        showlegend=False,
-                    )
-                    card_grafico("Análisis de descuentos — Waterfall revenue bruto vs. neto")
-                    st.plotly_chart(fig_descuentos, use_container_width=True)
-                    st.markdown("</div>", unsafe_allow_html=True)
+            total_sacrificado = df_filtrado['sacrificed_revenue'].sum()
+            total_bruto = df_filtrado['gross_revenue'].sum()
+            total_real = total_bruto - total_sacrificado
+            
+            fig_descuentos = go.Figure(go.Waterfall(
+                name="Descuentos",
+                orientation="v",
+                measure=["absolute", "relative", "total"],
+                x=["Revenue bruto", "Descuentos aplicados", "Revenue neto"],
+                y=[total_bruto, -total_sacrificado, total_real],
+                text=[f"${total_bruto:,.0f}", f"-${total_sacrificado:,.0f}", f"${total_real:,.0f}"],
+                textposition="outside",
+                increasing=dict(marker=dict(color='#4f8ef7')),
+                decreasing=dict(marker=dict(color='#f26b6b')),
+                totals=dict(marker=dict(color='#3ecf8e')),
+            ))
+            aplicar_layout(fig_descuentos, "Impacto de los descuentos sobre el revenue")   
+            fig_descuentos.update_layout(
+                yaxis=dict(gridcolor="#1e2a3a"),
+                showlegend=False,
+            )
+            card_grafico("Análisis de descuentos — Waterfall revenue bruto vs. neto")
+            st.plotly_chart(fig_descuentos, use_container_width=True)
+            st.markdown("</div>", unsafe_allow_html=True)
 
                 
 # ══════════════════════════════════════════════════════════════════════════════
