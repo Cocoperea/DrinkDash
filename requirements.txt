@@ -18,3 +18,5 @@ numpy>=1.26.0
 # Autenticación — hashing de contraseñas
 bcrypt>=4.1.0
 
+# Exportación a pdf
+fpdf2>=2.7.0

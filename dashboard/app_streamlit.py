@@ -1554,3 +1554,331 @@ if auth.tiene_permiso("RF-14") and st.session_state.seccion_activa == "estaciona
             card_grafico(f"Evolución del revenue — Vista {granularidad_est}")
             st.plotly_chart(fig_est, use_container_width=True)
             st.markdown("</div>", unsafe_allow_html=True)
+
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# RF-EXP — Exportar reportes (exclusivo para rol Dirección)
+# Permite exportar los datos filtrados actualmente en formato CSV o PDF.
+# El PDF incluye: resumen de filtros activos, métricas clave y tablas de datos.
+# El CSV incluye el DataFrame completo filtrado en ese momento.
+# ══════════════════════════════════════════════════════════════════════════════
+if ROL == "direccion" and st.session_state.seccion_activa == "exportar":
+ 
+    import io
+    from datetime import datetime
+ 
+    st.markdown("""
+    <div style="margin-bottom:20px;">
+        <h2 style="font-size:1.2rem; font-weight:700; color:#e8eaf0; margin:0 0 6px;">
+            📤 Exportar Reportes
+        </h2>
+        <p style="font-size:0.85rem; color:#8b95a8; margin:0;">
+            Generá un archivo con los datos y métricas correspondientes a los filtros aplicados actualmente.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+ 
+    # ── Resumen de filtros activos ────────────────────────────────────────────
+    filtros_resumen = []
+    if tiene_fecha and fecha_desde and fecha_hasta:
+        filtros_resumen.append(f"Período: {fecha_desde.strftime('%d/%m/%Y')} → {fecha_hasta.strftime('%d/%m/%Y')}")
+    if categorias_sel:
+        filtros_resumen.append(f"Categorías: {', '.join(categorias_sel)}")
+    if marcas_sel:
+        filtros_resumen.append(f"Marcas: {', '.join(marcas_sel)}")
+    if not filtros_resumen:
+        filtros_resumen.append("Sin filtros aplicados — mostrando todos los datos")
+ 
+    st.markdown(f"""
+    <div style="background:#1c2333; border:1px solid #2a3347; border-radius:8px;
+                padding:12px 16px; margin-bottom:20px; font-size:0.82rem; color:#8b95a8;">
+        <strong style="color:#e8eaf0;">Filtros activos:</strong><br/>
+        {"<br/>".join(filtros_resumen)}<br/>
+        <span style="margin-top:6px; display:block;">
+            Registros incluidos: <strong style="color:#4f8ef7;">{len(df_filtrado):,}</strong>
+        </span>
+    </div>
+    """, unsafe_allow_html=True)
+ 
+    if df_filtrado.empty:
+        st.warning("⚠️ No hay datos para exportar con los filtros seleccionados.")
+        st.stop()
+ 
+    # ── Métricas derivadas para el reporte ───────────────────────────────────
+    revenue_total   = df_filtrado['amount'].sum()         if 'amount'    in df_filtrado.columns else None
+    n_transacciones = len(df_filtrado)
+    ticket_prom     = revenue_total / n_transacciones     if revenue_total and n_transacciones else None
+    unidades_total  = df_filtrado['quantity'].sum()       if 'quantity'  in df_filtrado.columns else None
+    n_productos     = df_filtrado['product_name'].nunique() if 'product_name' in df_filtrado.columns else None
+ 
+    # ── Vista previa ─────────────────────────────────────────────────────────
+    with st.expander("👁️ Vista previa de los datos a exportar", expanded=False):
+        st.dataframe(df_filtrado.head(50), use_container_width=True, height=300)
+ 
+    st.markdown("<br/>", unsafe_allow_html=True)
+ 
+    col_fmt, col_btn = st.columns([1, 2])
+ 
+    with col_fmt:
+        formato_export = st.radio(
+            "Formato de exportación",
+            options=["CSV", "PDF"],
+            index=0,
+            horizontal=False,
+            key="export_formato",
+        )
+ 
+    timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+    nombre_base   = f"DrinkDash_Reporte_{timestamp_str}"
+ 
+    with col_btn:
+        st.markdown("<br/>", unsafe_allow_html=True)
+ 
+        # ── Exportación CSV ──────────────────────────────────────────────────
+        if formato_export == "CSV":
+            # Preparamos el CSV en memoria con encode UTF-8-BOM para compatibilidad con Excel
+            csv_buffer = io.StringIO()
+            df_filtrado.drop(
+                columns=[c for c in ['_purchase_date', '_fecha', 'periodo', 'periodo_dt'] if c in df_filtrado.columns],
+                errors='ignore'
+            ).to_csv(csv_buffer, index=False, encoding='utf-8')
+            csv_bytes = ("\ufeff" + csv_buffer.getvalue()).encode("utf-8")  # BOM para Excel
+ 
+            st.download_button(
+                label="⬇️  Descargar CSV",
+                data=csv_bytes,
+                file_name=f"{nombre_base}.csv",
+                mime="text/csv",
+                use_container_width=True,
+                key="btn_export_csv",
+            )
+            st.markdown(
+                '<div style="font-size:0.75rem; color:#4a5568; margin-top:6px;">'
+                'El archivo incluirá todos los registros filtrados y sus columnas originales.</div>',
+                unsafe_allow_html=True
+            )
+ 
+        # ── Exportación PDF ──────────────────────────────────────────────────
+        elif formato_export == "PDF":
+ 
+            def _safe(text):
+                """Reemplaza caracteres fuera del rango latin-1 por equivalentes ASCII
+                para garantizar compatibilidad con las fuentes base de fpdf2."""
+                return (
+                    str(text)
+                    .replace("\u2014", "-")    # em dash
+                    .replace("\u2013", "-")    # en dash
+                    .replace("\u2192", "->")   # flecha derecha ->
+                    .replace("\u2190", "<-")   # flecha izquierda
+                    .replace("\u2022", "*")    # bullet
+                    .replace("\u00e9", "e")    # e acentuada (solo por seguridad)
+                    .encode("latin-1", errors="replace").decode("latin-1")
+                )
+ 
+            def generar_pdf(df_exp, filtros, revenue, transacciones, ticket, unidades, n_prod, fecha_gen):
+                """
+                Genera un PDF de reporte ejecutivo en memoria usando fpdf2.
+                fpdf2 es pura Python, sin dependencias de sistema (pip install fpdf2).
+                Devuelve bytes del PDF listos para descargar.
+                """
+                try:
+                    from fpdf import FPDF, XPos, YPos
+                except ImportError:
+                    import subprocess, sys
+                    subprocess.check_call(
+                        [sys.executable, "-m", "pip", "install", "fpdf2", "--quiet"],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    )
+                    from fpdf import FPDF, XPos, YPos
+ 
+                # Paleta de colores (R, G, B)
+                C_CARD    = (28,  35,  51)
+                C_BORDER  = (42,  51,  71)
+                C_BLUE    = (79,  142, 247)
+                C_TEXT    = (232, 234, 240)
+                C_MUTED   = (139, 149, 168)
+                C_WHITE   = (255, 255, 255)
+                C_HDR_ROW = (22,  27,  39)
+ 
+                _fecha = _safe(fecha_gen)
+ 
+                class ReportePDF(FPDF):
+                    def header(self):
+                        self.set_fill_color(*C_BLUE)
+                        self.rect(0, 0, 210, 6, "F")
+ 
+                    def footer(self):
+                        self.set_y(-12)
+                        self.set_font("Helvetica", "I", 7)
+                        self.set_text_color(*C_MUTED)
+                        self.cell(
+                            0, 4,
+                            f"DrinkDash DataVista  |  Generado el {_fecha}  |  Confidencial  |  Pag. {self.page_no()}",
+                            align="C",
+                        )
+ 
+                pdf = ReportePDF(orientation="P", unit="mm", format="A4")
+                pdf.set_auto_page_break(auto=True, margin=15)
+                pdf.set_margins(left=18, top=14, right=18)
+                pdf.add_page()
+ 
+                # Titulo
+                pdf.set_y(10)
+                pdf.set_font("Helvetica", "B", 22)
+                pdf.set_text_color(*C_TEXT)
+                pdf.cell(0, 10, "DrinkDash", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+ 
+                pdf.set_font("Helvetica", "", 11)
+                pdf.set_text_color(*C_MUTED)
+                pdf.cell(0, 6, "Reporte Ejecutivo - Dashboard Direccion", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+ 
+                pdf.set_font("Helvetica", "", 8)
+                pdf.cell(0, 5, f"Generado el {_fecha}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+ 
+                pdf.ln(3)
+                pdf.set_draw_color(*C_BORDER)
+                pdf.set_line_width(0.4)
+                pdf.line(18, pdf.get_y(), 192, pdf.get_y())
+                pdf.ln(5)
+ 
+                # Filtros activos
+                pdf.set_font("Helvetica", "B", 10)
+                pdf.set_text_color(*C_BLUE)
+                pdf.cell(0, 6, "Filtros aplicados", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                pdf.set_font("Helvetica", "", 9)
+                pdf.set_text_color(*C_MUTED)
+                for f in filtros:
+                    pdf.cell(4)
+                    pdf.cell(0, 5, _safe(f"*  {f}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                pdf.ln(3)
+ 
+                # Metricas clave
+                pdf.set_font("Helvetica", "B", 10)
+                pdf.set_text_color(*C_BLUE)
+                pdf.cell(0, 6, "Metricas clave", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                pdf.ln(1)
+ 
+                metricas = []
+                if revenue  is not None: metricas.append(("Revenue Total",     f"${revenue:,.0f}"))
+                metricas.append(                         ("Transacciones",      f"{transacciones:,}"))
+                if ticket   is not None: metricas.append(("Ticket Promedio",   f"${ticket:,.2f}"))
+                if unidades is not None: metricas.append(("Unidades Vendidas", f"{int(unidades):,}"))
+                if n_prod   is not None: metricas.append(("Productos unicos",  str(n_prod)))
+ 
+                COL_W, CARD_H = 85, 16
+                x0, y0 = 18.0, pdf.get_y()
+                for i, (label, val) in enumerate(metricas):
+                    col = i % 2
+                    row = i // 2
+                    cx  = x0 + col * (COL_W + 4)
+                    cy  = y0 + row * (CARD_H + 3)
+                    pdf.set_fill_color(*C_CARD)
+                    pdf.set_draw_color(*C_BORDER)
+                    pdf.set_line_width(0.3)
+                    pdf.rect(cx, cy, COL_W, CARD_H, "FD")
+                    pdf.set_xy(cx + 4, cy + 2)
+                    pdf.set_font("Helvetica", "B", 13)
+                    pdf.set_text_color(*C_TEXT)
+                    pdf.cell(COL_W - 8, 7, _safe(val))
+                    pdf.set_xy(cx + 4, cy + 9)
+                    pdf.set_font("Helvetica", "", 7)
+                    pdf.set_text_color(*C_MUTED)
+                    pdf.cell(COL_W - 8, 5, _safe(label))
+ 
+                n_filas_met = (len(metricas) + 1) // 2
+                pdf.set_y(y0 + n_filas_met * (CARD_H + 3) + 4)
+                pdf.ln(3)
+ 
+                # Tabla de transacciones
+                COLS_MOSTRAR = [
+                    ("product_name", "Producto",  52),
+                    ("category",     "Categoria", 28),
+                    ("brand",        "Marca",     28),
+                    ("quantity",     "Uds.",      15),
+                    ("unit_price",   "Precio U.", 22),
+                    ("amount",       "Monto",     22),
+                ]
+                cols_pres = [(c, lbl, w) for c, lbl, w in COLS_MOSTRAR if c in df_exp.columns]
+ 
+                if cols_pres:
+                    pdf.set_font("Helvetica", "B", 10)
+                    pdf.set_text_color(*C_BLUE)
+                    pdf.cell(0, 6, "Detalle de transacciones (primeros 200 registros)",
+                             new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                    pdf.ln(1)
+ 
+                    df_tabla = df_exp[[c for c, _, _ in cols_pres]].head(200).copy()
+                    if "amount"     in df_tabla.columns:
+                        df_tabla["amount"]     = df_tabla["amount"].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "")
+                    if "unit_price" in df_tabla.columns:
+                        df_tabla["unit_price"] = df_tabla["unit_price"].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "")
+                    if "quantity"   in df_tabla.columns:
+                        df_tabla["quantity"]   = df_tabla["quantity"].apply(lambda x: f"{int(x):,}" if pd.notna(x) else "")
+ 
+                    ROW_H = 6
+                    pdf.set_fill_color(*C_BLUE)
+                    pdf.set_text_color(*C_WHITE)
+                    pdf.set_font("Helvetica", "B", 7.5)
+                    pdf.set_draw_color(*C_BORDER)
+                    pdf.set_line_width(0.3)
+                    for _, lbl, w in cols_pres:
+                        pdf.cell(w, ROW_H, lbl, border=1, fill=True, align="C")
+                    pdf.ln()
+ 
+                    pdf.set_font("Helvetica", "", 7)
+                    for idx, (_, row) in enumerate(df_tabla.iterrows()):
+                        pdf.set_fill_color(*(C_CARD if idx % 2 == 0 else C_HDR_ROW))
+                        pdf.set_text_color(*C_TEXT)
+                        for c, _, w in cols_pres:
+                            val = str(row[c]) if pd.notna(row[c]) else ""
+                            if len(val) > 22:
+                                val = val[:20] + ".."
+                            aln = "R" if c in ("amount", "unit_price", "quantity") else "L"
+                            pdf.cell(w, ROW_H, _safe(val), border=1, fill=True, align=aln)
+                        pdf.ln()
+ 
+                    if len(df_exp) > 200:
+                        pdf.ln(2)
+                        pdf.set_font("Helvetica", "I", 7)
+                        pdf.set_text_color(*C_MUTED)
+                        pdf.cell(
+                            0, 4,
+                            _safe(f"* Se muestran los primeros 200 de {len(df_exp):,} registros. "
+                                  "Descarga el CSV para acceder a todos los datos."),
+                            new_x=XPos.LMARGIN, new_y=YPos.NEXT,
+                        )
+ 
+                return bytes(pdf.output())
+ 
+            # Boton de descarga PDF
+            fecha_generacion = datetime.now().strftime("%d/%m/%Y %H:%M")
+            try:
+                with st.spinner("Generando PDF..."):
+                    pdf_bytes = generar_pdf(
+                        df_filtrado,
+                        filtros_resumen,
+                        revenue_total,
+                        n_transacciones,
+                        ticket_prom,
+                        unidades_total,
+                        n_productos,
+                        fecha_generacion,
+                    )
+                st.download_button(
+                    label="\u2b07\ufe0f  Descargar PDF",
+                    data=pdf_bytes,
+                    file_name=f"{nombre_base}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True,
+                    key="btn_export_pdf",
+                )
+                st.markdown(
+                    '<div style="font-size:0.75rem; color:#4a5568; margin-top:6px;">'
+                    "El PDF incluye metricas clave y los primeros 200 registros del periodo filtrado.</div>",
+                    unsafe_allow_html=True
+                )
+            except Exception as e:
+                st.error(f"Error al generar el PDF: {e}")
+                st.info("Intenta exportar en formato CSV como alternativa.")
+ 
