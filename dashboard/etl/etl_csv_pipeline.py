@@ -55,36 +55,18 @@ def _procesar_csv_a_sqlite():
         
         # LOAD
         #abro la conexion e inserto la tabla, si ya existe solo agrega las nuevas ventas
-        conn = sqlite3.connect(DB_PATH)
-        df.to_sql('ventas_procesadas', conn, if_exists='append', index=False)
-        conn.close()
+        with sqlite3.connect(DB_PATH) as conn:
+            df.to_sql(
+                "ventas_procesadas",
+                conn,
+                if_exists="append",
+                index=False
+            )
         
         #renombro para no volver a procesar
         ruta_procesado = os.path.join(INPUT_DIR, f"procesado_{archivo}")
         os.rename(ruta_completa, ruta_procesado)
         print(f"Archivo cargado en la base de datos: {DB_PATH}")
-
-# BLOQUE AIRFLOW
-try:
-    from airflow import DAG
-    from airflow.operators.python import PythonOperator
-
-    default_args = {"owner": "Grupo_10", "retries": 1, "retry_delay": timedelta(minutes=1)}
-    
-    with DAG(
-        dag_id="drinkdash_csv_etl",
-        start_date=datetime(2026, 5, 1),
-        schedule_interval="*/5 * * * *", 
-        catchup=False,
-        tags=["drinkdash", "grupo10"]
-    ) as dag:
-        procesar_datos = PythonOperator(
-            task_id="extraer_transformar_cargar_csv",
-            python_callable=_procesar_csv_a_sqlite,
-        )
-except ImportError:
-    #Si Airflow no está instalado simplemente sigue de largo
-    pass
 
 # BLOQUE PARA PRUEBA LOCAL
 if __name__ == "__main__":
