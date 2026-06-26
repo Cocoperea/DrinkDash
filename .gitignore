@@ -11,3 +11,4 @@ airflow/logs/
 airflow/plugins/
 airflow/__pycache__/
 data/
+logs/

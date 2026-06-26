@@ -12,7 +12,7 @@ else:
     INPUT_DIR = "/opt/airflow/data/input_csv"
     DB_PATH = "/opt/airflow/data/drinkdash.db"
 
-def _procesar_csv_a_sqlite():
+def procesar_csv_a_sqlite():
     print(f"Buscando archivos en: {INPUT_DIR}")
     
     # Creamos la carpeta automáticamente si no existe para evitar errores
@@ -70,4 +70,4 @@ def _procesar_csv_a_sqlite():
 
 # BLOQUE PARA PRUEBA LOCAL
 if __name__ == "__main__":
-    _procesar_csv_a_sqlite()
+    procesar_csv_a_sqlite()
